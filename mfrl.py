@@ -9,5 +9,4 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from mfrl_lib.environment import *
-from mfrl_lib.func import *
 

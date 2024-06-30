@@ -1,5 +1,5 @@
 from collections import deque
-from gymnasium import Env
+import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.spaces import Box, MultiBinary
 import networkx as nx
@@ -18,36 +18,46 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
+class Agent:
+    def __init__(self, adj_n):
+        self.env = MFRLEnv(adj_n)
 
-class PNDEnv(Env):
+class MFRLEnv(gym.Env):
+    def __init__(self, adj_n):
+        self.adj_n = adj_n
+        self.observation_space = Box(low=0, high=1, shape=(self.adj_n, 1))
+        self.action_space = MultiBinary(self.adj_n)
+        
+
+
+class PNDEnv(gym.Env):
     def __init__(self, **kwargs):
-            """
-            Initialize the PNDEnv class.
+        """
+        Initialize the PNDEnv class.
 
-            Parameters:
-            - n (int): The number of nodes in the environment.
-            - density (float): The density of the environment.
-            - max_epi (int): The maximum number of episodes.
-            - model (str): The model to be used.
+        Parameters:
+        - n (int): The number of nodes in the environment.
+        - density (float): The density of the environment.
+        - max_epi (int): The maximum number of episodes.
+        - model (str): The model to be used.
 
-            Returns:
-            None
-            """
-            super(PNDEnv, self).__init__()
-            self.n = kwargs.get("n", 10)
-            self.density = kwargs.get("density", 0.5)
-            self.model = kwargs.get("model", None)
-            self.max_steps = kwargs.get("max_steps", 300)
-            self.age_coeff = kwargs.get("age_coeff", 0.1)
+        Returns:
+        None
+        """
+        self.n = kwargs.get("n", 10)
+        self.density = kwargs.get("density", 0.5)
+        self.model = kwargs.get("model", None)
+        self.max_steps = kwargs.get("max_steps", 300)
+        self.age_coeff = kwargs.get("age_coeff", 0.1)
 
-            # Actions we can take 0) transmit and 1) listen
-            self.action_space = MultiBinary(self.n)
-            # Observation space
-            self.observation_space = spaces.Dict({
-                "current_age": Box(low=0, high=1, shape=(self.n, 1)),
-                "prev_result": MultiBinary([self.n, 1]),
-                # 0: Listening, 1: Transmitting
-            })
+        # Actions we can take 0) transmit and 1) listen
+        self.action_space = MultiBinary(self.n)
+        # Observation space
+        self.observation_space = spaces.Dict({
+            "current_age": Box(low=0, high=1, shape=(self.n, 1)),
+            "prev_result": MultiBinary([self.n, 1]),
+            # 0: Listening, 1: Transmitting
+        })
 
     def get_obs(self):
         current_age = np.reshape(self._current_age, newshape=(self.n))
