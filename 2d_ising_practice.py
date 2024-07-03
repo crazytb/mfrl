@@ -68,7 +68,7 @@ def get_reward(action, tx_success):
     if (action[0] == 1) and (tx_success == 1):
         return torch.tensor(1.)
     else:
-        return torch.tensor(-1.)
+        return torch.tensor(0.)
     # return torch.tanh(5*r)
 
 def get_num_tx_success(grid):
@@ -109,9 +109,9 @@ def mean_action(grid, j):
 # Parameters
 num_states = 2
 num_actions = 2
-size = (10, 10)
+size = (3, 3)
 J = np.prod(size)
-hid_layer = 20
+hid_layer = 10
 layers = [(num_states, hid_layer),
           (hid_layer, num_actions)]
 params = gen_params(1,num_states*hid_layer+hid_layer*num_actions)
@@ -128,14 +128,14 @@ replay_size = 50
 replay = deque(maxlen=replay_size)
 batch_size = 10
 gamma = 0.9
-losses = [[] for i in range(J)]
+losses = [[] for _ in range(J)]
 
 for i in range(epochs):
     act_means = torch.zeros((J, 2))
     q_next = torch.zeros(J)
-    tx_success = torch.ones(J)
+    adj_idle = torch.ones(J)
     
-    for m in range(num_iter):
+    for _ in range(num_iter):
         for j in range(J):
             action_mean = mean_action(grid_, j).detach()
             act_means[j] = action_mean.clone()
@@ -144,14 +144,14 @@ for i in range(epochs):
             # if actions of adjacents of j are all 0, tx_success[j] = 1,
             # otherwise, tx_success[j] = 0
             if any(get_adj_actions(grid_, j)):
-                tx_success[j] = 0
+                adj_idle[j] = 0
             grid_[get_coords(grid_, j)] = action
             q_next[j] = torch.max(qvals).detach()
     
     grid.data = grid_.data
     actions = torch.stack([get_substate(a.item()) for a in grid.flatten()])
     # rewards = torch.stack([get_reward_2d(actions[j], act_means[j]) for j in range(J)])
-    rewards = torch.stack([get_reward(actions[j], tx_success[j]) for j in range(J)])
+    rewards = torch.stack([get_reward(actions[j], adj_idle[j]) for j in range(J)])
     # Collects an experience and adds to the experience replay buffer
     exp = (actions, rewards, act_means, q_next)
     replay.append(exp)
@@ -174,6 +174,7 @@ for i in range(epochs):
             target = qvals.clone().detach()
             target[:, torch.argmax(jacts, dim=1)] = jrewards + gamma * vs
             loss = torch.sum(torch.pow(qvals - target.detach(), 2))
+            # loss = -1 * torch.sum(grid, require_grad=True)
             losses[j].append(loss.item())
             loss.backward()
             with torch.no_grad():
