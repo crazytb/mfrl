@@ -230,7 +230,7 @@ if not os.path.exists(output_path):
 writer = SummaryWriter(output_path + f"/{timestamp}")
 
 # Make topology
-topology = Topology(5, "dumbbell", 0.5)
+topology = Topology(10, "dumbbell", 0.5)
 topology.show_adjacency_matrix()
 node_n = topology.n
 
@@ -299,6 +299,9 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         avg_reward = episode_score / (node_n * MAX_STEPS)
         print(f"# of episode :{n_epi}, avg reward : {avg_reward:.1f}, buffer size : {agent.replaybuffer.size()}, epsilon : {epsilon*100:.1f}%")
 
+# Export settings
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
 # Save rewards to DataFrame and CSV
 reward_df = pd.DataFrame(reward_data)
 # Pivot the dataframe to have columns for each agent's reward at each step of each episode
@@ -306,13 +309,11 @@ df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', 
 # Rename the columns appropriately
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
 # Save the pivoted dataframe to a new CSV file
-df_pivot.to_csv('agent_rewards.csv', index=False)
-print("Rewards saved to agent_rewards.csv")
+df_pivot.to_csv(f'{timestamp}_agent_rewards.csv', index=False)
 
 # Export the replay buffer to a CSV file
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 rep_path = 'replay_buffers'
 if not os.path.exists(rep_path):
     os.makedirs(rep_path)
 for i in range(node_n):
-    agents[i].replaybuffer.export_buffer(path=rep_path, suffix=f'replay_buffer_{i}')
+    agents[i].replaybuffer.export_buffer(path=rep_path, suffix=f'{i}')
