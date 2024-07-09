@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -7,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-# from mfrl_lib.environment import *
 from collections import deque
 import gymnasium as gym
 from gymnasium import spaces
@@ -32,14 +32,6 @@ class Topology():
         self.adjacency_matrix = self.make_adjacency_matrix()
         
     def make_adjacency_matrix(self) -> np.ndarray:
-        """Make adjacency matrix of a clique network.
-        Args:
-            n (int): Number of nodes.
-            density (float): Density of the clique network.
-
-        Returns:
-            np.ndarray: Adjacency matrix.
-        """
         if self.density < 0 or self.density > 1:
             raise ValueError("Density must be between 0 and 1.")
 
@@ -64,7 +56,6 @@ class Topology():
                 adjacency_matrix[i-1, i] = 1
                 adjacency_matrix[i, i-1] = 1
                 n_edges -= 1
-            # If the density of the current adjacency matrix is over density, return it.
             if n_edges <= 0:
                 return adjacency_matrix
             else:
@@ -103,6 +94,7 @@ class MFRLEnv(gym.Env):
         self.adj_ids = agent.get_adjacent_ids()
         self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
         self.counter = 0
+        self.age = 0
 
         self.observation_space = spaces.Box(low=0, high=1, shape=(1, 2))
         self.action_space = spaces.Discrete(2)
@@ -111,24 +103,21 @@ class MFRLEnv(gym.Env):
         super().reset(seed=seed)
         observation = np.array([0.5, 0.5])
         info = {}
-        # Set MFRLEnv.actions to np.zeros with length of the number of agents
         MFRLEnv.actions = np.zeros(self.all_num)
+        self.counter = 0
+        self.age = 0
         return observation, info
     
     def gather_actions(self, action):
-        MFRLEnv.actions = np.append(MFRLEnv.actions, action)
+        MFRLEnv.actions = np.array(action)
         
     def calculate_meanfield(self):  
-        # Return the meanfield observation
         if self.idle_check():
-            return np.array([0, 1])
+            return np.array([0.0, 1.0])
         else:
-            return np.array(
-                (self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1, 0])) 
-                / (self.adj_num*(2**self.adj_num)-self.adj_num))
+            return np.array(self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1, 0]))/(self.adj_num*(2**self.adj_num)-self.adj_num)
 
     def idle_check(self):
-        # Check if all the adjacent agents are idle, based on MFRLEnv.actions
         if all(MFRLEnv.actions[self.adj_ids] == 0):
             return True
         else:
@@ -136,14 +125,16 @@ class MFRLEnv(gym.Env):
     
     def step(self, action):
         observation = self.calculate_meanfield()
+        self.age += 1/MAX_STEPS
         if action == 1 and self.idle_check():
-            reward = 1
+            reward = self.age
+            self.age = 0
         else:
             reward = 0
-        terminated = False
         self.counter += 1
+        terminated = False
         info = {}
-        if self.counter == MAX_COUNTER:
+        if self.counter == MAX_STEPS:
             terminated = True
         return observation, reward, terminated, False, info
 
@@ -164,31 +155,40 @@ class ReplayBuffer():
             r_lst.append([r])
             s_prime_lst.append(s_prime)
             done_mask_lst.append([done_mask])
-        return torch.tensor(np.stack(s_lst), dtype=torch.float).cuda(), torch.tensor(a_lst).cuda(), torch.tensor(r_lst).cuda(), torch.tensor(np.stack(s_prime_lst), dtype=torch.float).cuda(), torch.tensor(done_mask_lst).cuda()
+        return torch.tensor(np.stack(s_lst), dtype=torch.float).to(device), torch.tensor(a_lst).to(device), torch.tensor(r_lst).to(device), torch.tensor(np.stack(s_prime_lst), dtype=torch.float).to(device), torch.tensor(done_mask_lst).to(device)
     
     def size(self):
         return len(self.buffer)
+    
+    # Export the buffer to csv file into path
+    def export_buffer(self, path, suffix=''):
+        df = pd.DataFrame(self.buffer, columns=['s', 'a', 'r', 's_prime', 'done_mask'])
+        df.to_csv(path + f'/{timestamp}_{suffix}.csv', index=False)
     
 class Qnet(nn.Module):
     def __init__(self):
         super(Qnet, self).__init__()
         self.fc1 = nn.Linear(2, 128)
-        self.fc2 = nn.Linear(128, 128)
+        # self.fc2 = nn.Linear(128, 128)
+        self.fc2 = nn.LSTM(128, 128, batch_first=True)
         self.fc3 = nn.Linear(128, 2)
 
-    def forward(self, x):
+    def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        h = h.view(h.size(0), -1)
+        c = c.view(c.size(0), -1)
+        x, (h, c) = self.fc2(x, (h, c))
         x = self.fc3(x)
-        return x
+        return x, (h.unsqueeze(0), c.unsqueeze(0))
       
-    def sample_action(self, obs, epsilon):
-        out = self.forward(obs)
+    def sample_action(self, obs, h, c, epsilon):
+        obs = obs.unsqueeze(0)
+        out, (h, c) = self.forward(obs, h, c)
         coin = random.random()
         if coin < epsilon:
-            return random.randint(0,1)
+            return random.randint(0, 1), (h, c)
         else: 
-            return out.argmax().item()
+            return out.argmax().item(), (h, c)
 
 
 class Agent:
@@ -222,55 +222,97 @@ class Agent:
             loss.backward()
             optimizer.step()
     
+# Summarywriter setting
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+output_path = 'outputs'
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+writer = SummaryWriter(output_path + f"/{timestamp}")
 
 # Make topology
-topology = Topology(12, "dumbbell", 0.5)
+topology = Topology(5, "dumbbell", 0.5)
 topology.show_adjacency_matrix()
+node_n = topology.n
 
 # Hyperparameters
-MAX_COUNTER = 300
-BUFFER_LIMIT  = 50000
+MAX_STEPS = 300
+BUFFER_LIMIT  = 10000
 BATCH_SIZE    = 32
 GAMMA = 0.98
 
 # Make agents
-agents = [Agent(topology, i) for i in range(topology.n)]
+agents = [Agent(topology, i) for i in range(node_n)]
 
-MAX_EPISODES = 1000
+MAX_EPISODES = 500
 epsilon = 0.1
-print_interval = 20
+print_interval = 10
 score = 0.0
-q_target = Qnet().to(device)
-q_target.load_state_dict(agents[0].qnet.state_dict())
-optimizer = optim.Adam(agents[0].qnet.parameters(), lr=0.0005)
+q_target = [Qnet().to(device) for _ in range(node_n)]
+for i in range(node_n):
+    q_target[i].load_state_dict(agents[i].qnet.state_dict())
+optimizer = [optim.Adam(agents[i].qnet.parameters(), lr=0.0005) for i in range(node_n)]
 
-episode_rewards = []  # List to store average rewards per episode
+# DataFrame to store rewards
+reward_data = []
 
-for n_epi in range(MAX_EPISODES):
+for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     epsilon = max(0.01, 0.08 - 0.01*(n_epi/200)) # Linear annealing from 8% to 1%
     episode_score = 0.0  # Initialize episode score
-
-    for agent in agents:
-        observation, _ = agent.env.reset()
-        done = False
-    for agent in agents:
-            action = agent.qnet.sample_action(torch.from_numpy(observation).float().to(device), epsilon)
+    observation = [agent.env.reset()[0] for agent in agents]
+    done = False
+    next_observation = [0]*node_n
+    reward = [0]*node_n
+    action = [0]*node_n
+    h = [torch.zeros(1, 1, 128).to(device) for _ in range(node_n)]
+    c = [torch.zeros(1, 1, 128).to(device) for _ in range(node_n)]
+    
+    for t in tqdm(range(MAX_STEPS), desc="   Steps", position=1, leave=False):
+        for agent_id, agent in enumerate(agents):
+            action[agent_id], (h[agent_id], c[agent_id]) = agent.qnet.sample_action(torch.from_numpy(observation[agent_id]).float().to(device), 
+                                                                                  h[agent_id], 
+                                                                                  c[agent_id], 
+                                                                                  epsilon)
+        for agent in agents:
             agent.env.gather_actions(action)
-    for agent in agents:
-        while not done:    
-            next_observation, reward, done, _, info = agent.env.step(action)
+        for agent_id, agent in enumerate(agents):
+            next_observation[agent_id], reward[agent_id], done, _, _ = agent.env.step(action[agent_id])
             done_mask = 0.0 if done else 1.0
-            agent.replaybuffer.put((observation, action, reward, next_observation, done_mask))
-            observation = next_observation
-            episode_score += reward
+            agent.replaybuffer.put((observation[agent_id], 
+                                    action[agent_id], 
+                                    reward[agent_id], 
+                                    next_observation[agent_id], 
+                                    done_mask))
+            observation[agent_id] = next_observation[agent_id]
+            episode_score += reward[agent_id]
+            
+            # Append reward data
+            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'reward': reward[agent_id]})
 
-            if agent.replaybuffer.size() > 2000:
-                agent.train(q_target, optimizer)
+            if agent.replaybuffer.size() > BUFFER_LIMIT:
+                agent.train(q_target[agent_id], optimizer[agent_id])
 
-    episode_rewards.append(episode_score / topology.n)  # Calculate average reward for this episode
+    writer.add_scalar('Rewards per episodes', episode_score, n_epi)
 
     if n_epi % print_interval == 0 and n_epi != 0:
-        q_target.load_state_dict(agents[0].qnet.state_dict())
-        avg_reward = np.mean(episode_rewards[-print_interval:])  # Calculate average reward over print_interval
+        for i in range(node_n):
+            q_target[i].load_state_dict(agents[i].qnet.state_dict())
+        avg_reward = episode_score / (node_n * MAX_STEPS)
         print(f"# of episode :{n_epi}, avg reward : {avg_reward:.1f}, buffer size : {agent.replaybuffer.size()}, epsilon : {epsilon*100:.1f}%")
-        score = 0.0
+
+# Save rewards to DataFrame and CSV
+reward_df = pd.DataFrame(reward_data)
+# Pivot the dataframe to have columns for each agent's reward at each step of each episode
+df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='reward').reset_index()
+# Rename the columns appropriately
+df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
+# Save the pivoted dataframe to a new CSV file
+df_pivot.to_csv('agent_rewards.csv', index=False)
+print("Rewards saved to agent_rewards.csv")
+
+# Export the replay buffer to a CSV file
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+rep_path = 'replay_buffers'
+if not os.path.exists(rep_path):
+    os.makedirs(rep_path)
+for i in range(node_n):
+    agents[i].replaybuffer.export_buffer(path=rep_path, suffix=f'replay_buffer_{i}')
