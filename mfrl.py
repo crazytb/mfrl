@@ -1,3 +1,7 @@
+# https://github.com/keep9oing/DRQN-Pytorch-CartPole-v1
+# https://ropiens.tistory.com/80
+# https://github.com/chingyaoc/pytorch-REINFORCE/tree/master
+
 import os
 import numpy as np
 import pandas as pd
@@ -11,10 +15,12 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.utils.env_checker import check_env
 import networkx as nx
 import matplotlib.pyplot as plt
 import random
 import collections 
+
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -23,6 +29,7 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 print(f"Device: {device}")
+
 
 class Topology():
     def __init__(self, n, model="random", density=1):
@@ -101,7 +108,8 @@ class MFRLEnv(gym.Env):
         
     def reset(self, seed=None):
         super().reset(seed=seed)
-        observation = np.array([0.5, 0.5])
+        # observation = np.array([[0.5, 0.5]])
+        observation = [[0.5, 0.5]]
         info = {}
         MFRLEnv.actions = np.zeros(self.all_num)
         self.counter = 0
@@ -127,7 +135,7 @@ class MFRLEnv(gym.Env):
         observation = self.calculate_meanfield()
         self.age += 1/MAX_STEPS
         if action == 1 and self.idle_check():
-            reward = self.age
+            reward = np.log2(self.age+1)
             self.age = 0
         else:
             reward = 0
@@ -137,6 +145,7 @@ class MFRLEnv(gym.Env):
         if self.counter == MAX_STEPS:
             terminated = True
         return observation, reward, terminated, False, info
+
 
 class ReplayBuffer():
     def __init__(self):
@@ -165,13 +174,14 @@ class ReplayBuffer():
         df = pd.DataFrame(self.buffer, columns=['s', 'a', 'r', 's_prime', 'done_mask'])
         df.to_csv(path + f'/{timestamp}_{suffix}.csv', index=False)
     
+
 class Qnet(nn.Module):
-    def __init__(self):
+    def __init__(self, n_observations, n_actions):
         super(Qnet, self).__init__()
-        self.fc1 = nn.Linear(2, 128)
+        self.fc1 = nn.Linear(n_observations, 128)
         # self.fc2 = nn.Linear(128, 128)
         self.fc2 = nn.LSTM(128, 128, batch_first=True)
-        self.fc3 = nn.Linear(128, 2)
+        self.fc3 = nn.Linear(128, n_actions)
 
     def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
@@ -201,6 +211,8 @@ class Agent:
         self.env = MFRLEnv(self)
         self.replaybuffer = ReplayBuffer()
         self.qnet = Qnet().to(device)
+        self.targetnet = Qnet().to(device)
+        self.targetnet.load_state_dict(self.qnet.state_dict())
          
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
@@ -208,7 +220,8 @@ class Agent:
     def get_adjacent_num(self):
         return len(self.get_adjacent_ids())
     
-    def train(self, q_target, optimizer):
+    def train(self, q_target, optimizer, batch_size=32):
+        
         for _ in range(10):
             s, a, r, s_prime, done_mask = self.replaybuffer.sample(BATCH_SIZE)
 
@@ -222,6 +235,7 @@ class Agent:
             loss.backward()
             optimizer.step()
     
+
 # Summarywriter setting
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 output_path = 'outputs'
@@ -242,6 +256,8 @@ GAMMA = 0.98
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
+check_env(agents[0].env)
+
 
 MAX_EPISODES = 500
 epsilon = 0.1
