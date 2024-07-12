@@ -108,8 +108,8 @@ class MFRLEnv(gym.Env):
         
     def reset(self, seed=None):
         super().reset(seed=seed)
-        # observation = np.array([[0.5, 0.5]])
-        observation = [[0.5, 0.5]]
+        observation = np.array([[0.5, 0.5]])
+        # observation = [[0.5, 0.5]]
         info = {}
         MFRLEnv.actions = np.zeros(self.all_num)
         self.counter = 0
@@ -121,9 +121,9 @@ class MFRLEnv(gym.Env):
         
     def calculate_meanfield(self):  
         if self.idle_check():
-            return np.array([0.0, 1.0])
+            return np.array([[0.0, 1.0]])
         else:
-            return np.array(self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1, 0]))/(self.adj_num*(2**self.adj_num)-self.adj_num)
+            return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1, 0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
 
     def idle_check(self):
         if all(MFRLEnv.actions[self.adj_ids] == 0):
@@ -185,12 +185,12 @@ class Qnet(nn.Module):
 
     def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
-        h = h.view(h.size(0), -1)
-        c = c.view(c.size(0), -1)
-        x, (h, c) = self.fc2(x, (h, c))
+        # h = h.view(h.size(0), -1)
+        # c = c.view(c.size(0), -1)
+        x, (h_new, c_new) = self.fc2(x, (h, c))
         x = self.fc3(x)
-        return x, (h.unsqueeze(0), c.unsqueeze(0))
-      
+        return x, (h_new, c_new)
+
     def sample_action(self, obs, h, c, epsilon):
         obs = obs.unsqueeze(0)
         out, (h, c) = self.forward(obs, h, c)
@@ -210,30 +210,31 @@ class Agent:
             self.id = id
         self.env = MFRLEnv(self)
         self.replaybuffer = ReplayBuffer()
-        self.qnet = Qnet().to(device)
-        self.targetnet = Qnet().to(device)
+        self.qnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
+        self.targetnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.targetnet.load_state_dict(self.qnet.state_dict())
-         
+        self.optimizer = optim.Adam(self.qnet.parameters(), lr=0.0005)
+        
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
     
     def get_adjacent_num(self):
         return len(self.get_adjacent_ids())
     
-    def train(self, q_target, optimizer, batch_size=32):
+    def train(self):
         
         for _ in range(10):
             s, a, r, s_prime, done_mask = self.replaybuffer.sample(BATCH_SIZE)
 
             q_out = self.qnet(s)
             q_a = q_out.gather(1, a)
-            max_q_prime = q_target(s_prime).max(1)[0].unsqueeze(1)
+            max_q_prime = self.targetnet(s_prime).max(1)[0].unsqueeze(1)
             target = r + GAMMA * max_q_prime * done_mask
             loss = F.smooth_l1_loss(q_a, target)
             
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
     
 
 # Summarywriter setting
@@ -247,6 +248,8 @@ writer = SummaryWriter(output_path + f"/{timestamp}")
 topology = Topology(10, "dumbbell", 0.5)
 topology.show_adjacency_matrix()
 node_n = topology.n
+N_OBSERVATIONS = 2
+N_ACTIONS = 2
 
 # Hyperparameters
 MAX_STEPS = 300
@@ -256,16 +259,14 @@ GAMMA = 0.98
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
-check_env(agents[0].env)
+# check_env(agents[0].env)
 
 
 MAX_EPISODES = 500
 epsilon = 0.1
 print_interval = 10
 score = 0.0
-q_target = [Qnet().to(device) for _ in range(node_n)]
-for i in range(node_n):
-    q_target[i].load_state_dict(agents[i].qnet.state_dict())
+# q_target = [Qnet().to(device) for _ in range(node_n)]
 optimizer = [optim.Adam(agents[i].qnet.parameters(), lr=0.0005) for i in range(node_n)]
 
 # DataFrame to store rewards
@@ -305,13 +306,13 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
             reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'reward': reward[agent_id]})
 
             if agent.replaybuffer.size() > BUFFER_LIMIT:
-                agent.train(q_target[agent_id], optimizer[agent_id])
+                agent.train()
 
     writer.add_scalar('Rewards per episodes', episode_score, n_epi)
 
     if n_epi % print_interval == 0 and n_epi != 0:
         for i in range(node_n):
-            q_target[i].load_state_dict(agents[i].qnet.state_dict())
+            agents[i].targetnet.load_state_dict(agents[i].qnet.state_dict())
         avg_reward = episode_score / (node_n * MAX_STEPS)
         print(f"# of episode :{n_epi}, avg reward : {avg_reward:.1f}, buffer size : {agent.replaybuffer.size()}, epsilon : {epsilon*100:.1f}%")
 
