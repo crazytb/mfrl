@@ -134,6 +134,7 @@ class MFRLEnv(gym.Env):
     def step(self, action):
         observation = self.calculate_meanfield()
         self.age += 1/MAX_STEPS
+        # Implement here!
         if action == 1 and self.idle_check():
             reward = np.log2(self.age+1)
             self.age = 0

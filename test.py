@@ -64,12 +64,6 @@ class Topology:
 def get_adjacent_nodes(node, topology):
     return np.where(topology.adjacency_matrix[node] == 1)[0]
 
-def get_adjacent_idle_node(node, topology, tx_trials):
-    adjacent_nodes = get_adjacent_nodes(node, topology)
-    for adj_node in adjacent_nodes:
-        if tx_trials[adj_node] == 0:
-            return adj_node
-    return None
 
 def run_simulation(topology, 
                    n_steps=300, 
@@ -80,10 +74,10 @@ def run_simulation(topology,
     episode_length = n_steps
     total_utility = 0
     log_data = []
-    aoi = np.zeros(node_n)
-
+    
     for episode in range(n_episodes):
         episode_utility = 0
+        aoi = np.zeros(node_n)
         
         for step in range(episode_length):
             actions = np.random.rand(node_n)
@@ -92,17 +86,19 @@ def run_simulation(topology,
             utility = np.array([0.0])
             aoi += 1 / episode_length
 
-            # Implement here!
+            # 전송을 시도하는 노드들에 대해,
             for i in np.where(tx_trials == 1)[0]:
-                if any(tx_trials == 1):
-                    adjacent_idle_node = get_adjacent_idle_node(i, topology, tx_trials)
-                    if adjacent_idle_node is not None:
-                        utility += 1
+                for j in get_adjacent_nodes(i, topology):
+                    js_adjacent_nodes = get_adjacent_nodes(j, topology)
+                    ind = np.argwhere(js_adjacent_nodes == i)
+                    js_adjacent_nodes_minus_ind = np.delete(js_adjacent_nodes, ind)
+                    if np.all(tx_trials[js_adjacent_nodes_minus_ind]==0) and tx_trials[j]==0:
+                        utility += np.log2(1 + aoi[i])
                         aoi[i] = 0
-                        aoi[adjacent_idle_node] = 0
+                        break
 
             episode_utility += utility
-            log_entry = [episode, step] + aoi.tolist() + np.where(tx_trials==1)[0].tolist()
+            log_entry = [episode, step] + aoi.tolist() + utility.tolist() + np.where(tx_trials==1)[0].tolist()
             log_data.append(log_entry)
                 
         total_utility += episode_utility
@@ -110,7 +106,7 @@ def run_simulation(topology,
     # Save logs to CSV
     with open(log_file, mode='w', newline='') as file:
         writer = csv.writer(file)
-        header = ["Episode", "Step"] + [f"Node_{i}" for i in range(node_n)] + ["Transmitted_Nodes"]
+        header = ["Episode"] + ["Step"] + [f"Node_{i}" for i in range(node_n)] + ["Utility"] + ["Transmitted_Nodes"] 
         writer.writerow(header)
         writer.writerows(log_data)
     
@@ -118,6 +114,10 @@ def run_simulation(topology,
     return average_utility
 
 # Example usage
-topology = Topology(10, "dumbbell", 0.5)
-average_utility = run_simulation(topology, n_steps=300, n_episodes=100, transmission_probs=0.5, log_file="simulation_logs.csv")
+topology = Topology(12, "dumbbell")
+average_utility = run_simulation(topology,
+                                 n_steps=300,
+                                 n_episodes=100,
+                                 transmission_probs=0.2,
+                                 log_file="simulation_logs.csv")
 print(f"Average Utility over 100 episodes: {average_utility}")
