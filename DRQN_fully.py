@@ -245,7 +245,7 @@ if __name__ == "__main__":
     writer = SummaryWriter('runs/'+env_name+"_"+model_name+"_"+exp_num)
 
     # Set parameters
-    batch_size = 8
+    batch_size = 10
     learning_rate = 1e-3
     buffer_len = int(100000)
     min_epi_num = 16 # Start moment to train the Q network
@@ -259,7 +259,7 @@ if __name__ == "__main__":
     max_step = 2000
 
     # DRQN param
-    random_update = True# If you want to do random update instead of sequential update
+    random_update = True # If you want to do random update instead of sequential update
     lookup_step = 10 # If you want to do random update instead of sequential update
     max_epi_len = 128
     max_epi_step = max_step
