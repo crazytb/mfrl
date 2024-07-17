@@ -148,6 +148,7 @@ class MFRLEnv(gym.Env):
                     and MFRLEnv.actions[j] == 0):
                     reward = np.log2(self.age+1)
                     self.age = 0
+                    break
                 else:
                     reward = 0
         else:
@@ -184,10 +185,10 @@ class ReplayBuffer():
             s_prime_lst.append(s_prime)
             done_mask_lst.append([done_mask])
         return (torch.tensor(np.stack(s_lst), dtype=torch.float32).to(device),
-                torch.tensor(a_lst, dtype=torch.float32).to(device),
-                torch.tensor(r_lst, dtype=torch.float32).to(device),
+                torch.tensor(a_lst).to(device),
+                torch.tensor(r_lst).to(device),
                 torch.tensor(np.stack(s_prime_lst), dtype=torch.float32).to(device),
-                torch.tensor(done_mask_lst, dtype=torch.float32).to(device))
+                torch.tensor(done_mask_lst).to(device))
     
     def size(self):
         return len(self.buffer)
@@ -262,7 +263,7 @@ class Agent:
         h = torch.zeros(1, MAX_STEPS, 128).to(device)
         c = torch.zeros(1, MAX_STEPS, 128).to(device)
         q_out, _, _ = self.qnet(s, h, c)
-        a = a.view(MAX_STEPS, 1, -1)
+        a = a.view(MAX_STEPS, 1, -1).to(torch.int64)
         q_a = q_out.gather(2, a)
 
         loss = F.smooth_l1_loss(q_a, target)        
@@ -295,19 +296,15 @@ GAMMA = 0.98
 agents = [Agent(topology, i) for i in range(node_n)]
 # check_env(agents[0].env)
 
-
 MAX_EPISODES = 500
 epsilon = 0.1
 print_interval = 10
-score = 0.0
-# q_target = [Qnet().to(device) for _ in range(node_n)]
-optimizer = [optim.Adam(agents[i].qnet.parameters(), lr=0.0005) for i in range(node_n)]
 
 # DataFrame to store rewards
 reward_data = []
 
 for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
-    epsilon = max(0.01, 0.08 - 0.01*(n_epi/200)) # Linear annealing from 8% to 1%
+    epsilon = max(0.01, 0.08 - 0.01*(n_epi/100)) # Linear annealing from 8% to 1%
     episode_score = 0.0  # Initialize episode score
     observation = [agent.env.reset()[0] for agent in agents]
     done = False

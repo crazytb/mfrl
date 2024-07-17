@@ -1,7 +1,7 @@
 import sys
 from typing import Dict, List, Tuple
 
-import gym
+import gymnasium as gym
 import collections
 import random
 import numpy as np
