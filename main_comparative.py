@@ -95,7 +95,8 @@ def run_simulation(topology,
                     js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes!=i]
                     if ((np.all(tx_trials[js_adjacent_nodes_except_ind]==0)) 
                         and (tx_trials[j]==0)):
-                        utility += np.log2(1 + aoi[i])
+                        # utility += np.log2(1 + aoi[i])
+                        utility += np.tanh(5*aoi[i])
                         aoi[i] = 0
                         break
 

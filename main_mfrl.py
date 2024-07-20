@@ -146,7 +146,8 @@ class MFRLEnv(gym.Env):
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
                 if (np.all(MFRLEnv.actions[js_adjacent_nodes_except_ind] == 0)
                     and MFRLEnv.actions[j] == 0):
-                    reward = np.log2(self.age+1)
+                    # reward = np.log2(self.age+1)
+                    reward = np.tanh(5*self.age)
                     self.age = 0
                     break
                 else:
@@ -250,23 +251,23 @@ class Agent:
     
     def train(self):
         # for _ in range(10):
-        s, a, r, s_prime, done_mask = self.replaybuffer.sample(n=MAX_STEPS, updates="random")
+        s, a, r, s_prime, done_mask = self.replaybuffer.sample(n=MAX_SEQ, updates="random")
         # s, a, r, s_prime, done_mask = self.replaybuffer.sample()
-        h_target = torch.zeros(1, MAX_STEPS, 128).to(device)
-        c_target = torch.zeros(1, MAX_STEPS, 128).to(device)
+        h_target = torch.zeros(1, MAX_SEQ, 128).to(device)
+        c_target = torch.zeros(1, MAX_SEQ, 128).to(device)
         q_target, _, _ = self.qnet(s_prime, h_target, c_target)
-        q_target_max = q_target.max(2)[0].view(MAX_STEPS, 1, -1).detach()
-        r = r.view(MAX_STEPS, 1, -1)
-        done_mask = done_mask.view(MAX_STEPS, 1, -1)
+        q_target_max = q_target.max(2)[0].view(MAX_SEQ, 1, -1).detach()
+        r = r.view(MAX_SEQ, 1, -1)
+        done_mask = done_mask.view(MAX_SEQ, 1, -1)
         target = r + GAMMA * q_target_max * done_mask
         
-        h = torch.zeros(1, MAX_STEPS, 128).to(device)
-        c = torch.zeros(1, MAX_STEPS, 128).to(device)
+        h = torch.zeros(1, MAX_SEQ, 128).to(device)
+        c = torch.zeros(1, MAX_SEQ, 128).to(device)
         q_out, _, _ = self.qnet(s, h, c)
-        a = a.view(MAX_STEPS, 1, -1).to(torch.int64)
+        a = a.view(MAX_SEQ, 1, -1).to(torch.int64)
         q_a = q_out.gather(2, a)
 
-        loss = F.smooth_l1_loss(q_a, target)        
+        loss = F.smooth_l1_loss(q_a, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -280,7 +281,8 @@ if not os.path.exists(output_path):
 writer = SummaryWriter(output_path + f"/{timestamp}")
 
 # Make topology
-topology = Topology(12, "dumbbell", 0.5)
+# topology = Topology(12, "dumbbell", 0.5)
+topology = Topology(10, "random", 1)
 topology.show_adjacency_matrix()
 node_n = topology.n
 N_OBSERVATIONS = 2
@@ -288,6 +290,7 @@ N_ACTIONS = 2
 
 # Hyperparameters
 MAX_STEPS = 300
+MAX_SEQ = 5
 BUFFER_LIMIT  = 10000
 BATCH_SIZE    = 32
 GAMMA = 0.98
@@ -305,7 +308,7 @@ reward_data = []
 
 for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     epsilon = max(0.01, 0.08 - 0.01*(n_epi/100)) # Linear annealing from 8% to 1%
-    episode_score = 0.0  # Initialize episode score
+    episode_utility = 0.0  # Initialize episode score
     observation = [agent.env.reset()[0] for agent in agents]
     done = False
     next_observation = [0]*node_n
@@ -331,7 +334,7 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
                                     next_observation[agent_id], 
                                     done_mask))
             observation[agent_id] = next_observation[agent_id]
-            episode_score += reward[agent_id]
+            episode_utility += reward[agent_id]
             
             # Append reward data
             reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'reward': reward[agent_id]})
@@ -340,13 +343,12 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
             if n_epi >= 3:
                 agent.train()
 
-    writer.add_scalar('Rewards per episodes', episode_score, n_epi)
+    writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
 
     if n_epi % print_interval == 0 and n_epi != 0:
         for i in range(node_n):
             agents[i].targetnet.load_state_dict(agents[i].qnet.state_dict())
-        avg_reward = episode_score / (node_n * MAX_STEPS)
-        print(f"# of episode :{n_epi}, avg reward : {avg_reward:.1f}, buffer size : {agent.replaybuffer.size()}, epsilon : {epsilon*100:.1f}%")
+        print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}, buffer size : {agent.replaybuffer.size()}, epsilon : {epsilon*100:.1f}%")
 
 # Export settings
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
