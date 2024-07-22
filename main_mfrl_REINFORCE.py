@@ -262,27 +262,6 @@ class Agent:
             loss.backward()
         self.optimizer.step()
         self.data = []
-        # # for _ in range(10):
-        # s, a, r, s_prime, done_mask = self.replaybuffer.sample(n=MAX_SEQ, updates="random")
-        # # s, a, r, s_prime, done_mask = self.replaybuffer.sample()
-        # h_target = torch.zeros(1, MAX_SEQ, 128).to(device)
-        # c_target = torch.zeros(1, MAX_SEQ, 128).to(device)
-        # q_target, _, _ = self.pinet(s_prime, h_target, c_target)
-        # q_target_max = q_target.max(2)[0].view(MAX_SEQ, 1, -1).detach()
-        # r = r.view(MAX_SEQ, 1, -1)
-        # done_mask = done_mask.view(MAX_SEQ, 1, -1)
-        # target = r + GAMMA * q_target_max * done_mask
-        
-        # h = torch.zeros(1, MAX_SEQ, 128).to(device)
-        # c = torch.zeros(1, MAX_SEQ, 128).to(device)
-        # q_out, _, _ = self.pinet(s, h, c)
-        # a = a.view(MAX_SEQ, 1, -1).to(torch.int64)
-        # q_a = q_out.gather(2, a)
-
-        # loss = F.smooth_l1_loss(q_a, target)
-        # self.optimizer.zero_grad()
-        # loss.backward()
-        # self.optimizer.step()
     
 
 # Summarywriter setting
@@ -293,7 +272,7 @@ if not os.path.exists(output_path):
 writer = SummaryWriter(output_path + f"/{timestamp}")
 
 # Make topology
-topology = Topology(12, "dumbbell", 0.5)
+topology = Topology(8, "dumbbell")
 # topology = Topology(10, "random", 1)
 topology.show_adjacency_matrix()
 node_n = topology.n
@@ -302,15 +281,14 @@ N_ACTIONS = 2
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_SEQ = 5
+MAX_EPISODES = 50
+print_interval = 10
 GAMMA = 0.98
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
 # check_env(agents[0].env)
 
-MAX_EPISODES = 500
-print_interval = 10
 
 # DataFrame to store rewards
 reward_data = []
