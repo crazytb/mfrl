@@ -158,51 +158,12 @@ class MFRLEnv(gym.Env):
             terminated = True
         return observation, reward, terminated, False, info
 
-
-# class ReplayBuffer():
-#     def __init__(self):
-#         self.buffer = collections.deque(maxlen=BUFFER_LIMIT)
-    
-#     def put(self, transition):
-#         self.buffer.append(transition)
-    
-#     def sample(self, n, updates="sequential"):
-#         if updates == "random":
-#             mini_batch = random.sample(self.buffer, n)
-#         elif updates == "sequential":
-#             # epi_len is the number of entries that has done_mask = 0
-#             epi_idx = random.randint(0, n_epi-1)
-#             mini_batch = list(itertools.islice(self.buffer, epi_idx, epi_idx+n))
-
-#         s_lst, a_lst, r_lst, s_prime_lst, done_mask_lst = [], [], [], [], []
-#         for transition in mini_batch:
-#             s, a, r, s_prime, done_mask = transition
-#             s_lst.append(s)
-#             a_lst.append([a])
-#             r_lst.append([r])
-#             s_prime_lst.append(s_prime)
-#             done_mask_lst.append([done_mask])
-#         return (torch.tensor(np.stack(s_lst), dtype=torch.float32).to(device),
-#                 torch.tensor(a_lst).to(device),
-#                 torch.tensor(r_lst).to(device),
-#                 torch.tensor(np.stack(s_prime_lst), dtype=torch.float32).to(device),
-#                 torch.tensor(done_mask_lst).to(device))
-    
-#     def size(self):
-#         return len(self.buffer)
-    
-#     # Export the buffer to csv file into path
-#     def export_buffer(self, path, suffix=''):
-#         df = pd.DataFrame(self.buffer, columns=['s', 'a', 'r', 's_prime', 'done_mask'])
-#         df.to_csv(path + f'/{timestamp}_{suffix}.csv', index=False)
-    
-
 class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
-        self.fc1 = nn.Linear(n_observations, 128)
-        self.fc2 = nn.LSTM(128, 128, batch_first=True)
-        self.fc3 = nn.Linear(128, n_actions)
+        self.fc1 = nn.Linear(n_observations, N_HIDDEN)
+        self.fc2 = nn.LSTM(N_HIDDEN, N_HIDDEN, batch_first=True)
+        self.fc3 = nn.Linear(N_HIDDEN, n_actions)
 
     def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
@@ -213,22 +174,6 @@ class Pinet(nn.Module):
         x = F.softmax(x, dim=1)
         return x, h_new, c_new
     
-class Qnet(nn.Module):
-    def __init__(self, n_observations, n_actions):
-        super(Pinet, self).__init__()
-        self.fc1 = nn.Linear(n_observations, 128)
-        self.fc2 = nn.LSTM(128, 128, batch_first=True)
-        self.fc3 = nn.Linear(128, n_actions)
-
-    def forward(self, x, h, c):
-        x = F.relu(self.fc1(x))
-        h = h.view(h.size(0), -1)
-        c = c.view(c.size(0), -1)
-        x, (h_new, c_new) = self.fc2(x, (h, c))
-        x = self.fc3(x)
-        return x, h_new, c_new
-
-
 class Agent:
     def __init__(self, topology, id):
         self.topology = topology
@@ -237,11 +182,8 @@ class Agent:
         else:
             self.id = id
         self.env = MFRLEnv(self)
-        # self.replaybuffer = ReplayBuffer()
         self.data = []
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
-        # self.targetnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
-        # self.targetnet.load_state_dict(self.pinet.state_dict())
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=0.0005)
         
     def get_adjacent_ids(self):
@@ -277,6 +219,7 @@ topology = Topology(8, "dumbbell")
 topology.show_adjacency_matrix()
 node_n = topology.n
 N_OBSERVATIONS = 2
+N_HIDDEN = 8
 N_ACTIONS = 2
 
 # Hyperparameters
@@ -287,15 +230,12 @@ GAMMA = 0.98
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
-# check_env(agents[0].env)
-
 
 # DataFrame to store rewards
 reward_data = []
 
 # for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
 for n_epi in range(MAX_EPISODES):
-    # epsilon = max(0.01, 0.08 - 0.01*(n_epi/100)) # Linear annealing from 8% to 1%
     episode_utility = 0.0  # Initialize episode score
     observation = [agent.env.reset()[0] for agent in agents]
     done = False
@@ -303,16 +243,12 @@ for n_epi in range(MAX_EPISODES):
     reward = [0]*node_n
     action = [0]*node_n
     probs = []
-    h = [torch.zeros(1, 1, 128).to(device) for _ in range(node_n)]
-    c = [torch.zeros(1, 1, 128).to(device) for _ in range(node_n)]
+    h = [torch.zeros(1, 1, N_HIDDEN).to(device) for _ in range(node_n)]
+    c = [torch.zeros(1, 1, N_HIDDEN).to(device) for _ in range(node_n)]
     
     # for t in tqdm(range(MAX_STEPS), desc="   Steps", position=1, leave=False):
     for t in range(MAX_STEPS):
         for agent_id, agent in enumerate(agents):
-            # action[agent_id], h[agent_id], c[agent_id] = agent.qnet.sample_action(torch.from_numpy(observation[agent_id]).float().to(device), 
-            #                                                                       h[agent_id], 
-            #                                                                       c[agent_id], 
-            #                                                                       epsilon)
             prob, h[agent_id], c[agent_id] = agent.pinet(torch.from_numpy(observation[agent_id]).float().to(device), 
                                                          h[agent_id], 
                                                          c[agent_id])
@@ -326,11 +262,6 @@ for n_epi in range(MAX_EPISODES):
             next_observation[agent_id], reward[agent_id], done, _, _ = agent.env.step(action[agent_id])
             done_mask = 0.0 if done else 1.0
 
-            # agent.replaybuffer.put((observation[agent_id], 
-            #                         action[agent_id], 
-            #                         reward[agent_id], 
-            #                         next_observation[agent_id], 
-            #                         done_mask))
             observation[agent_id] = next_observation[agent_id]
             episode_utility += reward[agent_id]
             
@@ -355,10 +286,3 @@ df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', 
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
 # Save the pivoted dataframe to a new CSV file
 df_pivot.to_csv(f'{timestamp}_agent_rewards.csv', index=False)
-
-# Export the replay buffer to a CSV file
-rep_path = 'replay_buffers'
-if not os.path.exists(rep_path):
-    os.makedirs(rep_path)
-for i in range(node_n):
-    agents[i].replaybuffer.export_buffer(path=rep_path, suffix=f'{i}')
