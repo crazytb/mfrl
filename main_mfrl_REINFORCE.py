@@ -24,8 +24,7 @@ elif torch.backends.mps.is_available():
     device = torch.device("mps")
 else:
     device = torch.device("cpu")
-print(f"Device: {device}")
-
+# print(f"Device: {device}")
 
 class Topology():
     def __init__(self, n, model="random", density=1):
@@ -99,17 +98,17 @@ class MFRLEnv(gym.Env):
         self.counter = 0
         self.age = 0
 
-        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 2))
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 3))
         self.action_space = spaces.Discrete(2)
         
     def reset(self, seed=None):
         super().reset(seed=seed)
-        observation = np.array([[0.5, 0.5]])
+        self.counter = 0
+        self.age = 0
+        observation = np.array([[0.5, 0.5, self.age]])
         # observation = [[0.5, 0.5]]
         info = {}
         MFRLEnv.actions = np.zeros(self.all_num)
-        self.counter = 0
-        self.age = 0
         return observation, info
     
     def gather_actions(self, action):
@@ -134,8 +133,11 @@ class MFRLEnv(gym.Env):
             return np.where(topology.adjacency_matrix[self.id] == 1)[0]
     
     def step(self, action):
-        observation = self.calculate_meanfield()
+        self.counter += 1
         self.age += 1/MAX_STEPS
+        observation = self.calculate_meanfield()
+        observation = np.append(observation, self.counter/MAX_STEPS)
+        observation = np.array([observation])
         if action == 1:
             adjacent_nodes = self.get_adjacent_nodes()
             for j in adjacent_nodes:
@@ -151,7 +153,7 @@ class MFRLEnv(gym.Env):
                     reward = 0
         else:
             reward = 0
-        self.counter += 1
+        
         terminated = False
         info = {}
         if self.counter == MAX_STEPS:
@@ -204,7 +206,6 @@ class Agent:
             loss.backward()
         self.optimizer.step()
         self.data = []
-    
 
 # Summarywriter setting
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -218,7 +219,7 @@ topology = Topology(8, "dumbbell")
 # topology = Topology(10, "random", 1)
 topology.show_adjacency_matrix()
 node_n = topology.n
-N_OBSERVATIONS = 2
+N_OBSERVATIONS = 3
 N_HIDDEN = 8
 N_ACTIONS = 2
 
