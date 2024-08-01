@@ -2,7 +2,9 @@
 # https://ropiens.tistory.com/80
 # https://github.com/chingyaoc/pytorch-REINFORCE/tree/master
 
+import sys
 import os
+from typing import Dict
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -10,6 +12,7 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import gymnasium as gym
@@ -203,10 +206,11 @@ class ReplayBuffer():
 class Qnet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Qnet, self).__init__()
-        self.fc1 = nn.Linear(n_observations, 128)
+        self.hidden_space = 128
+        self.fc1 = nn.Linear(n_observations, self.hidden_space)
         # self.fc2 = nn.Linear(128, 128)
-        self.fc2 = nn.LSTM(128, 128, batch_first=True)
-        self.fc3 = nn.Linear(128, n_actions)
+        self.fc2 = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
+        self.fc3 = nn.Linear(self.hidden_space, n_actions)
 
     def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
@@ -225,19 +229,132 @@ class Qnet(nn.Module):
         else: 
             return out.argmax().item(), h, c
         
+    def init_hidden_state(self, batch_size, training=None):
+        assert training is not None, "training step parameter should be determined"
+        if training is True:
+            return torch.zeros([1, batch_size, self.hidden_space]), torch.zeros([1, batch_size, self.hidden_space])
+        else:
+            return torch.zeros([1, 1, self.hidden_space]), torch.zeros([1, 1, self.hidden_space])
+
+        
     # def init_hidden_state(self, batch_size=300):
     #     return torch.zeros(batch_size, 1, 128).to(device), torch.zeros(batch_size, 1, 128).to(device)
+
+class EpisodeMemory():
+    """Episode memory for recurrent agent"""
+
+    def __init__(self, random_update=False, 
+                       max_epi_num=100, max_epi_len=500,
+                       batch_size=1,
+                       lookup_step=None):
+        self.random_update = random_update # if False, sequential update
+        self.max_epi_num = max_epi_num
+        self.max_epi_len = max_epi_len
+        self.batch_size = batch_size
+        self.lookup_step = lookup_step
+
+        if (random_update is False) and (self.batch_size > 1):
+            sys.exit('It is recommend to use 1 batch for sequential update, if you want, erase this code block and modify code')
+
+        self.memory = collections.deque(maxlen=self.max_epi_num)
+
+    def put(self, episode):
+        self.memory.append(episode)
+
+    def sample(self):
+        sampled_buffer = []
+
+        ##################### RANDOM UPDATE ############################
+        if self.random_update: # Random upodate
+            sampled_episodes = random.sample(self.memory, self.batch_size)
+            
+            check_flag = True # check if every sample data to train is larger than batch size
+            min_step = self.max_epi_len
+
+            for episode in sampled_episodes:
+                min_step = min(min_step, len(episode)) # get minimum step from sampled episodes
+
+            for episode in sampled_episodes:
+                if min_step > self.lookup_step: # sample buffer with lookup_step size
+                    idx = np.random.randint(0, len(episode)-self.lookup_step+1)
+                    sample = episode.sample(random_update=self.random_update, lookup_step=self.lookup_step, idx=idx)
+                    sampled_buffer.append(sample)
+                else:
+                    idx = np.random.randint(0, len(episode)-min_step+1) # sample buffer with minstep size
+                    sample = episode.sample(random_update=self.random_update, lookup_step=min_step, idx=idx)
+                    sampled_buffer.append(sample)
+
+        ##################### SEQUENTIAL UPDATE ############################           
+        else: # Sequential update
+            idx = np.random.randint(0, len(self.memory))
+            sampled_buffer.append(self.memory[idx].sample(random_update=self.random_update))
+
+        return sampled_buffer, len(sampled_buffer[0]['obs']) # buffers, sequence_length
+
+    def export(self, path):
+        for i, episode in enumerate(self.memory):
+            episode.replaybuffer.export_buffer(path, suffix=f'episode_{i}')
+    
+    def __len__(self):
+        return len(self.memory)
+
+
+class EpisodeBuffer:
+    """A simple numpy replay buffer."""
+
+    def __init__(self):
+        self.obs = []
+        self.action = []
+        self.reward = []
+        self.next_obs = []
+        self.done = []
+
+    def put(self, transition):
+        self.obs.append(transition[0])
+        self.action.append(transition[1])
+        self.reward.append(transition[2])
+        self.next_obs.append(transition[3])
+        self.done.append(transition[4])
+
+    def sample(self, random_update=False, lookup_step=None, idx=None) -> Dict[str, np.ndarray]:
+        obs = np.array(self.obs)
+        action = np.array(self.action)
+        reward = np.array(self.reward)
+        next_obs = np.array(self.next_obs)
+        done = np.array(self.done)
+
+        if random_update is True:
+            obs = obs[idx:idx+lookup_step]
+            action = action[idx:idx+lookup_step]
+            reward = reward[idx:idx+lookup_step]
+            next_obs = next_obs[idx:idx+lookup_step]
+            done = done[idx:idx+lookup_step]
+
+        return dict(obs=obs,
+                    acts=action,
+                    rews=reward,
+                    next_obs=next_obs,
+                    done=done)
+
+    def __len__(self) -> int:
+        return len(self.obs)
 
 
 class Agent:
     def __init__(self, topology, id):
+        self.gamma = GAMMA
         self.topology = topology
         if id >= topology.n:
             raise ValueError("id must be less than n.")
         else:
             self.id = id
         self.env = MFRLEnv(self)
-        self.replaybuffer = ReplayBuffer()
+        self.replaybuffer = EpisodeBuffer()
+        self.episode_memory = EpisodeMemory(random_update=False,
+                                            max_epi_num=100, 
+                                            max_epi_len=500,
+                                            batch_size=1,
+                                            lookup_step=5)
         self.qnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.targetnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.targetnet.load_state_dict(self.qnet.state_dict())
@@ -250,26 +367,55 @@ class Agent:
         return len(self.get_adjacent_ids())
     
     def train(self):
-        # for _ in range(10):
-        s, a, r, s_prime, done_mask = self.replaybuffer.sample(n=MAX_SEQ, updates="random")
-        # s, a, r, s_prime, done_mask = self.replaybuffer.sample()
-        h_target = torch.zeros(1, MAX_SEQ, 128).to(device)
-        c_target = torch.zeros(1, MAX_SEQ, 128).to(device)
-        q_target, _, _ = self.qnet(s_prime, h_target, c_target)
-        q_target_max = q_target.max(2)[0].view(MAX_SEQ, 1, -1).detach()
-        r = r.view(MAX_SEQ, 1, -1)
-        done_mask = done_mask.view(MAX_SEQ, 1, -1)
-        target = r + GAMMA * q_target_max * done_mask
-        
-        h = torch.zeros(1, MAX_SEQ, 128).to(device)
-        c = torch.zeros(1, MAX_SEQ, 128).to(device)
-        q_out, _, _ = self.qnet(s, h, c)
-        a = a.view(MAX_SEQ, 1, -1).to(torch.int64)
-        q_a = q_out.gather(2, a)
+        samples, seq_len = self.episode_memory.sample()
 
-        loss = F.smooth_l1_loss(q_a, target)
+        observations = []
+        actions = []
+        rewards = []
+        next_observations = []
+        dones = []
+
+        batch_size = 1
+        
+        for i in range(batch_size):
+            observations.append(samples[i]["obs"])
+            actions.append(samples[i]["acts"])
+            rewards.append(samples[i]["rews"])
+            next_observations.append(samples[i]["next_obs"])
+            dones.append(samples[i]["done"])
+
+        observations = np.array(observations)
+        actions = np.array(actions)
+        rewards = np.array(rewards)
+        next_observations = np.array(next_observations)
+        dones = np.array(dones)
+
+        observations = torch.FloatTensor(observations.reshape(batch_size,seq_len,-1)).to(device)
+        actions = torch.LongTensor(actions.reshape(batch_size,seq_len,-1)).to(device)
+        rewards = torch.FloatTensor(rewards.reshape(batch_size,seq_len,-1)).to(device)
+        next_observations = torch.FloatTensor(next_observations.reshape(batch_size,seq_len,-1)).to(device)
+        dones = torch.FloatTensor(dones.reshape(batch_size,seq_len,-1)).to(device)
+
+        h_target, c_target = self.targetnet.init_hidden_state(batch_size=batch_size, training=True)
+
+        q_target, _, _ = self.targetnet(next_observations, h_target.to(device), c_target.to(device))
+
+        q_target_max = q_target.max(2)[0].view(batch_size,seq_len,-1).detach()
+        targets = rewards + self.gamma*q_target_max*dones
+
+        h, c = self.qnet.init_hidden_state(batch_size=batch_size, training=True)
+        q_out, _, _ = self.qnet(observations, h.to(device), c.to(device))
+        q_a = q_out.gather(2, actions)
+
+        # Multiply Importance Sampling weights to loss        
+        loss = F.smooth_l1_loss(q_a, targets)
+        
+        # Update Network
+        max_grad_norm=1.0
         self.optimizer.zero_grad()
         loss.backward()
+        # Add gradient clipping here
+        clip_grad_norm_(self.qnet.parameters(), max_grad_norm)
         self.optimizer.step()
     
 
@@ -299,7 +445,7 @@ GAMMA = 0.98
 agents = [Agent(topology, i) for i in range(node_n)]
 # check_env(agents[0].env)
 
-MAX_EPISODES = 500
+MAX_EPISODES = 2
 epsilon = 0.1
 print_interval = 10
 
@@ -340,9 +486,12 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
             reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'reward': reward[agent_id]})
 
             # if agent.replaybuffer.size() >= BUFFER_LIMIT:
-            if n_epi >= 3:
-                agent.train()
+            # if n_epi >= 3:
 
+        for agent in agents:
+            agent.episode_memory.put(agent.replaybuffer)
+            agent.train()
+    
     writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
 
     if n_epi % print_interval == 0 and n_epi != 0:
@@ -362,9 +511,9 @@ df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.col
 # Save the pivoted dataframe to a new CSV file
 df_pivot.to_csv(f'{timestamp}_agent_rewards.csv', index=False)
 
-# Export the replay buffer to a CSV file
-rep_path = 'replay_buffers'
+# Export the episode memory to a CSV file
+rep_path = 'episode_memory'
 if not os.path.exists(rep_path):
     os.makedirs(rep_path)
 for i in range(node_n):
-    agents[i].replaybuffer.export_buffer(path=rep_path, suffix=f'{i}')
+    agents[i].episode_memory.export(rep_path, suffix=f'agent_{i}')
