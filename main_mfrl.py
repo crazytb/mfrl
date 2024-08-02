@@ -4,6 +4,7 @@
 
 import sys
 import os
+import csv
 from typing import Dict
 import numpy as np
 import pandas as pd
@@ -232,9 +233,11 @@ class Qnet(nn.Module):
     def init_hidden_state(self, batch_size, training=None):
         assert training is not None, "training step parameter should be determined"
         if training is True:
-            return torch.zeros([1, batch_size, self.hidden_space]), torch.zeros([1, batch_size, self.hidden_space])
+            return (torch.zeros([1, batch_size, self.hidden_space]), 
+                    torch.zeros([1, batch_size, self.hidden_space]))
         else:
-            return torch.zeros([1, 1, self.hidden_space]), torch.zeros([1, 1, self.hidden_space])
+            return (torch.zeros([1, 1, self.hidden_space]), 
+                    torch.zeros([1, 1, self.hidden_space]))
 
         
     # def init_hidden_state(self, batch_size=300):
@@ -254,7 +257,7 @@ class EpisodeMemory():
         self.lookup_step = lookup_step
 
         if (random_update is False) and (self.batch_size > 1):
-            sys.exit('It is recommend to use 1 batch for sequential update, if you want, erase this code block and modify code')
+            sys.exit('..')
 
         self.memory = collections.deque(maxlen=self.max_epi_num)
 
@@ -341,6 +344,11 @@ class EpisodeBuffer:
 
 
 class Agent:
+    episode_memory = EpisodeMemory(random_update=False,
+                                   max_epi_num=100, 
+                                   max_epi_len=500,
+                                   batch_size=1,
+                                   lookup_step=5)
     def __init__(self, topology, id):
         self.gamma = GAMMA
         self.topology = topology
@@ -350,11 +358,11 @@ class Agent:
             self.id = id
         self.env = MFRLEnv(self)
         self.replaybuffer = EpisodeBuffer()
-        self.episode_memory = EpisodeMemory(random_update=False,
-                                            max_epi_num=100, 
-                                            max_epi_len=500,
-                                            batch_size=1,
-                                            lookup_step=5)
+        # self.episode_memory = EpisodeMemory(random_update=False,
+        #                                     max_epi_num=100, 
+        #                                     max_epi_len=500,
+        #                                     batch_size=1,
+        #                                     lookup_step=5)
         self.qnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.targetnet = Qnet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.targetnet.load_state_dict(self.qnet.state_dict())
@@ -417,6 +425,18 @@ class Agent:
         # Add gradient clipping here
         clip_grad_norm_(self.qnet.parameters(), max_grad_norm)
         self.optimizer.step()
+
+
+def append_to_csv(filename, id, obs, action, reward, next_obs, done):
+    with open(filename, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # Write header if file is empty
+        if csvfile.tell() == 0:
+            writer.writerow(['agent_id', 'obs', 'action', 'reward', 'next_obs', 'done'])
+        
+        # Write data row
+        writer.writerow([id] + obs.tolist() + [action, reward] + next_obs.tolist() + [done])
     
 
 # Summarywriter setting
@@ -428,7 +448,7 @@ writer = SummaryWriter(output_path + f"/{timestamp}")
 
 # Make topology
 # topology = Topology(12, "dumbbell", 0.5)
-topology = Topology(10, "random", 1)
+topology = Topology(4, "random", 1)
 topology.show_adjacency_matrix()
 node_n = topology.n
 N_OBSERVATIONS = 2
@@ -436,9 +456,7 @@ N_ACTIONS = 2
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_SEQ = 5
 BUFFER_LIMIT  = 10000
-BATCH_SIZE    = 32
 GAMMA = 0.98
 
 # Make agents
@@ -479,6 +497,14 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
                                     reward[agent_id], 
                                     next_observation[agent_id], 
                                     done_mask))
+            # Append to CSV file
+            append_to_csv(f'transition_data.csv', 
+                          agent_id,
+                          observation[agent_id], 
+                          action[agent_id], 
+                          reward[agent_id], 
+                          next_observation[agent_id], 
+                          done_mask)
             observation[agent_id] = next_observation[agent_id]
             episode_utility += reward[agent_id]
             
@@ -490,7 +516,9 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
 
         for agent in agents:
             agent.episode_memory.put(agent.replaybuffer)
-            agent.train()
+    
+    for agent in agents:
+        agent.train()
     
     writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
 
@@ -512,8 +540,8 @@ df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.col
 df_pivot.to_csv(f'{timestamp}_agent_rewards.csv', index=False)
 
 # Export the episode memory to a CSV file
-rep_path = 'episode_memory'
-if not os.path.exists(rep_path):
-    os.makedirs(rep_path)
-for i in range(node_n):
-    agents[i].episode_memory.export(rep_path, suffix=f'agent_{i}')
+# rep_path = 'episode_memory'
+# if not os.path.exists(rep_path):
+#     os.makedirs(rep_path)
+# for i in range(node_n):
+#     agents[i].episode_memory.export(rep_path, suffix=f'agent_{i}')
