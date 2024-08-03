@@ -5,18 +5,19 @@
 import os
 import numpy as np
 import pandas as pd
-# from tqdm import tqdm
+from tqdm import tqdm
 from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions import Categorical
 import gymnasium as gym
 from gymnasium import spaces
 import networkx as nx
 import matplotlib.pyplot as plt
-
+from collections import deque
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -88,7 +89,6 @@ class Topology():
 
 
 class MFRLEnv(gym.Env):
-    actions = np.array([])
     def __init__(self, agent):
         self.id = agent.id
         self.all_num = agent.topology.n
@@ -97,6 +97,8 @@ class MFRLEnv(gym.Env):
         self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
         self.counter = 0
         self.age = 0
+        self.all_actions = np.zeros(self.all_num)
+        self.topology = agent.topology
 
         self.observation_space = spaces.Box(low=0, high=1, shape=(1, 3))
         self.action_space = spaces.Discrete(2)
@@ -106,13 +108,12 @@ class MFRLEnv(gym.Env):
         self.counter = 0
         self.age = 0
         observation = np.array([[0.5, 0.5, self.age]])
-        # observation = [[0.5, 0.5]]
         info = {}
-        MFRLEnv.actions = np.zeros(self.all_num)
+        self.all_actions = np.zeros(self.all_num)
         return observation, info
     
-    def gather_actions(self, action):
-        MFRLEnv.actions = np.array(action)
+    def set_all_actions(self, actions):
+        self.all_actions = np.array(actions)
         
     def calculate_meanfield(self):  
         if self.idle_check():
@@ -121,31 +122,30 @@ class MFRLEnv(gym.Env):
             return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
 
     def idle_check(self):
-        if all(MFRLEnv.actions[self.adj_ids] == 0):
+        if all(self.all_actions[self.adj_ids] == 0):
             return True
         else:
             return False
         
     def get_adjacent_nodes(self, *args):
         if len(args) > 0:
-            return np.where(topology.adjacency_matrix[args[0]] == 1)[0]
+            return np.where(self.topology.adjacency_matrix[args[0]] == 1)[0]
         else:
-            return np.where(topology.adjacency_matrix[self.id] == 1)[0]
+            return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
     
     def step(self, action):
         self.counter += 1
         self.age += 1/MAX_STEPS
         observation = self.calculate_meanfield()
-        observation = np.append(observation, self.counter/MAX_STEPS)
+        observation = np.append(observation, self.age)
         observation = np.array([observation])
         if action == 1:
             adjacent_nodes = self.get_adjacent_nodes()
             for j in adjacent_nodes:
                 js_adjacent_nodes = self.get_adjacent_nodes(j)
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
-                if (np.all(MFRLEnv.actions[js_adjacent_nodes_except_ind] == 0)
-                    and MFRLEnv.actions[j] == 0):
-                    # reward = np.log2(self.age+1)
+                if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
+                    and self.all_actions[j] == 0):
                     reward = np.tanh(5*self.age)
                     self.age = 0
                     break
@@ -160,33 +160,44 @@ class MFRLEnv(gym.Env):
             terminated = True
         return observation, reward, terminated, False, info
 
+
 class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
-        self.fc1 = nn.Linear(n_observations, N_HIDDEN)
-        self.fc2 = nn.LSTM(N_HIDDEN, N_HIDDEN, batch_first=True)
-        self.fc3 = nn.Linear(N_HIDDEN, n_actions)
+        self.hidden_space = 128
+        self.fc1 = nn.Linear(n_observations, self.hidden_space)
+        self.fc2 = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
+        self.fc3 = nn.Linear(self.hidden_space, n_actions)
 
     def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
-        h = h.view(h.size(0), -1)
-        c = c.view(c.size(0), -1)
         x, (h_new, c_new) = self.fc2(x, (h, c))
         x = self.fc3(x)
-        x = F.softmax(x, dim=1)
+        x = F.softmax(x, dim=2)
         return x, h_new, c_new
+
+    def sample_action(self, obs, h, c):
+        obs = obs.unsqueeze(0)
+        out, h, c = self.forward(obs, h, c)
+        m = Categorical(out)
+        action = m.sample()
+        return action.item(), h, c, out
+
+    def init_hidden_state(self):
+        return (torch.zeros([1, 1, self.hidden_space]), 
+                torch.zeros([1, 1, self.hidden_space]))
     
 class Agent:
     def __init__(self, topology, id):
+        self.gamma = GAMMA
         self.topology = topology
         if id >= topology.n:
             raise ValueError("id must be less than n.")
-        else:
-            self.id = id
+        self.id = id
         self.env = MFRLEnv(self)
-        self.data = []
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
-        self.optimizer = optim.Adam(self.pinet.parameters(), lr=0.0005)
+        self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
+        self.data = []
         
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
@@ -196,16 +207,22 @@ class Agent:
     
     def put_data(self, item):
         self.data.append(item)
-    
+
     def train(self):
         R = 0
+        loss = []
+        returns = []
+        for r, log_prob in reversed(self.data):
+            R = r + self.gamma * R
+            returns.insert(0, R)
+            loss.append(-log_prob * R)
+        
+        policy_loss = torch.stack(loss).sum()
         self.optimizer.zero_grad()
-        for r, prob in self.data[::-1]:
-            R = r + GAMMA * R
-            loss = -torch.log(prob) * R
-            loss.backward()
+        policy_loss.backward()
         self.optimizer.step()
         self.data = []
+
 
 # Summarywriter setting
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -216,7 +233,6 @@ writer = SummaryWriter(output_path + f"/{timestamp}")
 
 # Make topology
 topology = Topology(8, "dumbbell")
-# topology = Topology(10, "random", 1)
 topology.show_adjacency_matrix()
 node_n = topology.n
 N_OBSERVATIONS = 3
@@ -226,8 +242,11 @@ N_ACTIONS = 2
 # Hyperparameters
 MAX_STEPS = 300
 MAX_EPISODES = 50
-print_interval = 10
 GAMMA = 0.98
+LEARNING_RATE = 0.0005
+N_OBSERVATIONS = 3
+N_ACTIONS = 2
+print_interval = 10
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
@@ -235,55 +254,48 @@ agents = [Agent(topology, i) for i in range(node_n)]
 # DataFrame to store rewards
 reward_data = []
 
-# for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
-for n_epi in range(MAX_EPISODES):
-    episode_utility = 0.0  # Initialize episode score
+for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes"):
+    episode_utility = 0.0
     observation = [agent.env.reset()[0] for agent in agents]
-    done = False
-    next_observation = [0]*node_n
-    reward = [0]*node_n
-    action = [0]*node_n
-    probs = []
-    h = [torch.zeros(1, 1, N_HIDDEN).to(device) for _ in range(node_n)]
-    c = [torch.zeros(1, 1, N_HIDDEN).to(device) for _ in range(node_n)]
+    h = [torch.zeros(1, 1, 128).to(device).detach() for _ in range(node_n)]
+    c = [torch.zeros(1, 1, 128).to(device).detach() for _ in range(node_n)]
+    # for agent in agents:
+    #     agent.optimizer.zero_grad()
     
-    # for t in tqdm(range(MAX_STEPS), desc="   Steps", position=1, leave=False):
     for t in range(MAX_STEPS):
+        actions = []
+        log_probs = []
         for agent_id, agent in enumerate(agents):
-            prob, h[agent_id], c[agent_id] = agent.pinet(torch.from_numpy(observation[agent_id]).float().to(device), 
-                                                         h[agent_id], 
-                                                         c[agent_id])
-            probs.append(prob)
-            m = torch.distributions.Categorical(prob)
-            action[agent_id] = m.sample().item()
-
-        for agent in agents:
-            agent.env.gather_actions(action)
-        for agent_id, agent in enumerate(agents):
-            next_observation[agent_id], reward[agent_id], done, _, _ = agent.env.step(action[agent_id])
-            done_mask = 0.0 if done else 1.0
-
-            observation[agent_id] = next_observation[agent_id]
-            episode_utility += reward[agent_id]
-            
-            # Append reward data
-            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'reward': reward[agent_id]})
+            prob, h[agent_id], c[agent_id] = agent.pinet(torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
+                                                        h[agent_id], 
+                                                        c[agent_id])
+            dist = Categorical(prob)
+            action = dist.sample().item()
+            actions.append(action)
+            log_probs.append(dist.log_prob(torch.tensor(action).to(device).detach()))
+            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, -1].item()})
         
-    agent.train()
-    writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
-    # if n_epi % print_interval == 0 and n_epi != 0:
-        # for i in range(node_n):
-        #     agents[i].targetnet.load_state_dict(agents[i].pinet.state_dict())
-    print(f"# of episode :{n_epi}/{MAX_EPISODES}, reward : {episode_utility}")
+        for agent in agents:
+            agent.env.set_all_actions(actions)
+        
+        for agent_id, agent in enumerate(agents):
+            next_observation, reward, done, _, _ = agent.env.step(actions[agent_id])
+            log_prob = torch.log(prob[0, 0, actions[agent_id]])
+            reward = torch.tensor([reward], dtype=torch.float32).to(device)
+            agent.put_data((reward, log_prob))
+            observation[agent_id] = next_observation
+            episode_utility += reward
 
-# Export settings
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for agent in agents:
+        agent.train()
+    
+    writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
+
+    if n_epi % print_interval == 0:
+        print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
 
 # Save rewards to DataFrame and CSV
 reward_df = pd.DataFrame(reward_data)
-# Pivot the dataframe to have columns for each agent's reward at each step of each episode
-df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='reward').reset_index()
-# Rename the columns appropriately
+df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-# Save the pivoted dataframe to a new CSV file
-df_pivot.to_csv(f'{timestamp}_agent_rewards.csv', index=False)
+df_pivot.to_csv(f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_agent_rewards.csv', index=False)

@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.nn.utils import clip_grad_norm_
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -156,7 +157,8 @@ def train(q_net=None, target_q_net=None, episode_memory=None,
           optimizer = None,
           batch_size=1,
           learning_rate=1e-3,
-          gamma=0.99):
+          gamma=0.99,
+          max_grad_norm=1.0):
 
     assert device is not None, "None Device input: device should be selected."
 
@@ -206,6 +208,8 @@ def train(q_net=None, target_q_net=None, episode_memory=None,
     # Update Network
     optimizer.zero_grad()
     loss.backward()
+    # Add gradient clipping here
+    clip_grad_norm_(q_net.parameters(), max_grad_norm)
     optimizer.step()
 
 def seed_torch(seed):

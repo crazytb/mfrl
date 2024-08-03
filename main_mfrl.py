@@ -105,13 +105,12 @@ class MFRLEnv(gym.Env):
         self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
         self.counter = 0
         self.age = 0
-
-        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 2))
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 3))
         self.action_space = spaces.Discrete(2)
         
     def reset(self, seed=None):
         super().reset(seed=seed)
-        observation = np.array([[0.5, 0.5]])
+        observation = np.array([[0.5, 0.5, self.age]])
         # observation = [[0.5, 0.5]]
         info = {}
         MFRLEnv.actions = np.zeros(self.all_num)
@@ -124,9 +123,9 @@ class MFRLEnv(gym.Env):
         
     def calculate_meanfield(self):  
         if self.idle_check():
-            return np.array([[0.0, 1.0]])
+            return np.array([[1.0, 0.0]])
         else:
-            return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1, 0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
+            return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
 
     def idle_check(self):
         if all(MFRLEnv.actions[self.adj_ids] == 0):
@@ -141,7 +140,8 @@ class MFRLEnv(gym.Env):
             return np.where(topology.adjacency_matrix[self.id] == 1)[0]
     
     def step(self, action):
-        observation = self.calculate_meanfield()
+        meanfield = self.calculate_meanfield()
+        observation = np.append(meanfield, np.array([[self.age]]), axis=1)
         self.age += 1/MAX_STEPS
         if action == 1:
             adjacent_nodes = self.get_adjacent_nodes()
@@ -226,9 +226,9 @@ class Qnet(nn.Module):
         out, h, c = self.forward(obs, h, c)
         coin = random.random()
         if coin < epsilon:
-            return random.randint(0, 1), h, c
+            return random.randint(0, 1), h, c, out
         else: 
-            return out.argmax().item(), h, c
+            return out.argmax().item(), h, c, out
         
     def init_hidden_state(self, batch_size, training=None):
         assert training is not None, "training step parameter should be determined"
@@ -451,7 +451,7 @@ writer = SummaryWriter(output_path + f"/{timestamp}")
 topology = Topology(4, "random", 1)
 topology.show_adjacency_matrix()
 node_n = topology.n
-N_OBSERVATIONS = 2
+N_OBSERVATIONS = 3
 N_ACTIONS = 2
 
 # Hyperparameters
@@ -463,11 +463,12 @@ GAMMA = 0.98
 agents = [Agent(topology, i) for i in range(node_n)]
 # check_env(agents[0].env)
 
-MAX_EPISODES = 2
+MAX_EPISODES = 10
 epsilon = 0.1
 print_interval = 10
 
 # DataFrame to store rewards
+# transition_data = []
 reward_data = []
 
 for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
@@ -483,10 +484,14 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     
     for t in tqdm(range(MAX_STEPS), desc="   Steps", position=1, leave=False):
         for agent_id, agent in enumerate(agents):
-            action[agent_id], h[agent_id], c[agent_id] = agent.qnet.sample_action(torch.from_numpy(observation[agent_id]).float().to(device), 
+            action[agent_id], h[agent_id], c[agent_id], prob = agent.qnet.sample_action(torch.from_numpy(observation[agent_id]).float().to(device), 
                                                                                   h[agent_id], 
                                                                                   c[agent_id], 
                                                                                   epsilon)
+            reward_data.append({'episode': n_epi, 
+                                'step': t, 
+                                'agent_id': agent_id, 
+                                'prob of 1': prob[0, 0, -1]})
         for agent in agents:
             agent.env.gather_actions(action)
         for agent_id, agent in enumerate(agents):
@@ -498,18 +503,15 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
                                     next_observation[agent_id], 
                                     done_mask))
             # Append to CSV file
-            append_to_csv(f'transition_data.csv', 
-                          agent_id,
-                          observation[agent_id], 
-                          action[agent_id], 
-                          reward[agent_id], 
-                          next_observation[agent_id], 
-                          done_mask)
+            # append_to_csv(f'transition_data.csv', 
+            #               agent_id,
+            #               observation[agent_id], 
+            #               action[agent_id], 
+            #               reward[agent_id], 
+            #               next_observation[agent_id], 
+            #               done_mask)
             observation[agent_id] = next_observation[agent_id]
             episode_utility += reward[agent_id]
-            
-            # Append reward data
-            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'reward': reward[agent_id]})
 
             # if agent.replaybuffer.size() >= BUFFER_LIMIT:
             # if n_epi >= 3:
@@ -525,7 +527,7 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     if n_epi % print_interval == 0 and n_epi != 0:
         for i in range(node_n):
             agents[i].targetnet.load_state_dict(agents[i].qnet.state_dict())
-        print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}, buffer size : {agent.replaybuffer.size()}, epsilon : {epsilon*100:.1f}%")
+        print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
 
 # Export settings
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -533,15 +535,8 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # Save rewards to DataFrame and CSV
 reward_df = pd.DataFrame(reward_data)
 # Pivot the dataframe to have columns for each agent's reward at each step of each episode
-df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='reward').reset_index()
+df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
 # Rename the columns appropriately
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
 # Save the pivoted dataframe to a new CSV file
 df_pivot.to_csv(f'{timestamp}_agent_rewards.csv', index=False)
-
-# Export the episode memory to a CSV file
-# rep_path = 'episode_memory'
-# if not os.path.exists(rep_path):
-#     os.makedirs(rep_path)
-# for i in range(node_n):
-#     agents[i].episode_memory.export(rep_path, suffix=f'agent_{i}')
