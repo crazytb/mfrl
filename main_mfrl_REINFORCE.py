@@ -13,6 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Categorical
+from torchviz import make_dot
 import gymnasium as gym
 from gymnasium import spaces
 import networkx as nx
@@ -146,11 +147,13 @@ class MFRLEnv(gym.Env):
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
-                    reward = np.tanh(5*self.age)
+                    # reward = np.tanh(5*self.age)
+                    reward = 1
                     self.age = 0
                     break
                 else:
-                    reward = 0
+                    # reward = -ENERGY_COEFF
+                    reward = -1
         else:
             reward = 0
         
@@ -164,7 +167,7 @@ class MFRLEnv(gym.Env):
 class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
-        self.hidden_space = 128
+        self.hidden_space = 32
         self.fc1 = nn.Linear(n_observations, self.hidden_space)
         self.fc2 = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
         self.fc3 = nn.Linear(self.hidden_space, n_actions)
@@ -173,15 +176,16 @@ class Pinet(nn.Module):
         x = F.relu(self.fc1(x))
         x, (h_new, c_new) = self.fc2(x, (h, c))
         x = self.fc3(x)
-        x = F.softmax(x, dim=2)
+        # x = F.softmax(x, dim=2)
         return x, h_new, c_new
 
     def sample_action(self, obs, h, c):
-        obs = obs.unsqueeze(0)
+        # obs = obs.unsqueeze(0)
         out, h, c = self.forward(obs, h, c)
-        m = Categorical(out)
+        probs = F.softmax(out, dim=2)
+        m = Categorical(probs)
         action = m.sample()
-        return action.item(), h, c, out
+        return action.item(), h, c, m.log_prob(action), m.entropy()
 
     def init_hidden_state(self):
         return (torch.zeros([1, 1, self.hidden_space]), 
@@ -210,43 +214,65 @@ class Agent:
 
     def train(self):
         R = 0
-        loss = []
+        policy_loss = []
         returns = []
-        for r, log_prob in reversed(self.data):
+        entropy_term = 0
+        self.optimizer.zero_grad()
+        for r, log_prob, entropy in reversed(self.data):
             R = r + self.gamma * R
             returns.insert(0, R)
-            loss.append(-log_prob * R)
+            policy_loss.append(-log_prob * R)
+            entropy_term += entropy
         
-        policy_loss = torch.stack(loss).sum()
-        self.optimizer.zero_grad()
-        policy_loss.backward()
+        policy_loss = torch.stack(policy_loss).sum()
+        entropy_term = entropy_term.mean()
+        
+        loss = policy_loss - ENTROPY_COEFF * entropy_term
+        loss.backward()
+        
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(self.pinet.parameters(), MAX_GRAD_NORM)
+        
         self.optimizer.step()
         self.data = []
+        # R = 0
+        # loss = []
+        # returns = []
+        # self.optimizer.zero_grad()
+        # for r, log_prob in reversed(self.data):
+        #     R = r + self.gamma * R
+        #     returns.insert(0, R)
+        #     loss.append(-log_prob * R)
+        
+        # policy_loss = torch.stack(loss).sum()
+        # policy_loss.backward()
+        # self.optimizer.step()
+        # self.data = []
 
+
+# Hyperparameters
+MAX_STEPS = 300
+MAX_EPISODES = 100
+GAMMA = 0.98
+LEARNING_RATE = 0.0001
+N_OBSERVATIONS = 3
+N_ACTIONS = 2
+print_interval = 10
+ENERGY_COEFF = 1/MAX_STEPS
+ENTROPY_COEFF = 0.01
+MAX_GRAD_NORM = 0.5
 
 # Summarywriter setting
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 output_path = 'outputs'
 if not os.path.exists(output_path):
     os.makedirs(output_path)
-writer = SummaryWriter(output_path + f"/{timestamp}")
+writer = SummaryWriter(output_path + "/" + "REINFORCE_DRQN" + "_" + timestamp)
 
 # Make topology
-topology = Topology(8, "dumbbell")
+topology = Topology(4, "dumbbell")
 topology.show_adjacency_matrix()
 node_n = topology.n
-N_OBSERVATIONS = 3
-N_HIDDEN = 8
-N_ACTIONS = 2
-
-# Hyperparameters
-MAX_STEPS = 300
-MAX_EPISODES = 50
-GAMMA = 0.98
-LEARNING_RATE = 0.0005
-N_OBSERVATIONS = 3
-N_ACTIONS = 2
-print_interval = 10
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
@@ -254,37 +280,40 @@ agents = [Agent(topology, i) for i in range(node_n)]
 # DataFrame to store rewards
 reward_data = []
 
-for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes"):
+for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     episode_utility = 0.0
     observation = [agent.env.reset()[0] for agent in agents]
-    h = [torch.zeros(1, 1, 128).to(device).detach() for _ in range(node_n)]
-    c = [torch.zeros(1, 1, 128).to(device).detach() for _ in range(node_n)]
-    # for agent in agents:
-    #     agent.optimizer.zero_grad()
+    h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
+    c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
     
-    for t in range(MAX_STEPS):
+    for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):
         actions = []
         log_probs = []
+        entropies = []
         for agent_id, agent in enumerate(agents):
-            prob, h[agent_id], c[agent_id] = agent.pinet(torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
-                                                        h[agent_id], 
-                                                        c[agent_id])
-            dist = Categorical(prob)
-            action = dist.sample().item()
-            actions.append(action)
-            log_probs.append(dist.log_prob(torch.tensor(action).to(device).detach()))
-            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, -1].item()})
+            a, h[agent_id], c[agent_id], log_prob, entropy = agent.pinet.sample_action(
+                torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
+                h[agent_id], 
+                c[agent_id]
+            )
+            actions.append(a)
+            log_probs.append(log_prob)
+            entropies.append(entropy)
+            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': torch.exp(log_prob)[0].item()})
         
         for agent in agents:
             agent.env.set_all_actions(actions)
         
+        reward_sum = 0
         for agent_id, agent in enumerate(agents):
             next_observation, reward, done, _, _ = agent.env.step(actions[agent_id])
-            log_prob = torch.log(prob[0, 0, actions[agent_id]])
-            reward = torch.tensor([reward], dtype=torch.float32).to(device)
-            agent.put_data((reward, log_prob))
+            reward_sum += reward
+            # agent.put_data((reward, probs[agent_id][0, 0, actions[agent_id]]))
             observation[agent_id] = next_observation
             episode_utility += reward
+
+        for agent_id, agent in enumerate(agents):
+            agent.put_data((reward_sum, log_probs[agent_id], entropies[agent_id]))
 
     for agent in agents:
         agent.train()
