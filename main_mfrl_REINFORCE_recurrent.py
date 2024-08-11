@@ -13,7 +13,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Categorical
-from torchviz import make_dot
 import gymnasium as gym
 from gymnasium import spaces
 import networkx as nx
@@ -147,13 +146,12 @@ class MFRLEnv(gym.Env):
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
-                    reward = np.tanh(5*self.age)
-                    # reward = 1
+                    reward = 1
                     self.age = 0
                     break
                 else:
-                    reward = -ENERGY_COEFF
-                    # reward = -1
+                    
+                    reward = -1
         else:
             reward = 0
         
@@ -252,7 +250,7 @@ class Agent:
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 100
+MAX_EPISODES = 1000
 GAMMA = 0.98
 LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 3
