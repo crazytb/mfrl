@@ -147,13 +147,13 @@ class MFRLEnv(gym.Env):
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
-                    # reward = np.tanh(5*self.age)
-                    reward = 1
+                    reward = np.tanh(5*self.age)
+                    # reward = 1
                     self.age = 0
                     break
                 else:
-                    # reward = -ENERGY_COEFF
-                    reward = -1
+                    reward = -ENERGY_COEFF
+                    # reward = -1
         else:
             reward = 0
         
@@ -327,4 +327,4 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
 reward_df = pd.DataFrame(reward_data)
 df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-df_pivot.to_csv(f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_agent_rewards.csv', index=False)
+df_pivot.to_csv(f'REINFORCE_DRQN_{timestamp}.csv', index=False)

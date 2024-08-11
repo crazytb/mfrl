@@ -220,6 +220,17 @@ class Agent:
         self.optimizer.step()
         self.data = []
 
+# Hyperparameters
+MAX_STEPS = 300
+MAX_EPISODES = 100
+GAMMA = 0.98
+LEARNING_RATE = 0.0001
+N_OBSERVATIONS = 3
+N_ACTIONS = 2
+print_interval = 10
+ENERGY_COEFF = 1/MAX_STEPS
+ENTROPY_COEFF = 0.01
+MAX_GRAD_NORM = 0.5
 
 # Summarywriter setting
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -232,23 +243,9 @@ writer = SummaryWriter(output_path + "/" + "REINFORCE_vanilla" + "_" + timestamp
 topology = Topology(4, "dumbbell")
 topology.show_adjacency_matrix()
 node_n = topology.n
-N_OBSERVATIONS = 3
-N_HIDDEN = 8
-N_ACTIONS = 2
-
-# Hyperparameters
-MAX_STEPS = 300
-MAX_EPISODES = 100
-GAMMA = 0.98
-LEARNING_RATE = 0.0005
-N_OBSERVATIONS = 3
-N_ACTIONS = 2
-print_interval = 10
-ENERGY_COEFF = 1/MAX_STEPS
 
 # Make agents
 agents = [Agent(topology, i) for i in range(node_n)]
-
 
 # DataFrame to store rewards
 reward_data = []
@@ -288,4 +285,4 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
 reward_df = pd.DataFrame(reward_data)
 df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-df_pivot.to_csv(f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_agent_rewards.csv', index=False)
+df_pivot.to_csv(f'REINFORCE_vanilla_{timestamp}.csv', index=False)
