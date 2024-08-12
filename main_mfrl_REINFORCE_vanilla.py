@@ -221,7 +221,7 @@ class Agent:
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 1000
+MAX_EPISODES = 100
 GAMMA = 0.98
 LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 3
@@ -239,7 +239,7 @@ if not os.path.exists(output_path):
 writer = SummaryWriter(output_path + "/" + "REINFORCE_vanilla" + "_" + timestamp)
 
 # Make topology
-topology = Topology(4, "dumbbell")
+topology = Topology(10, "dumbbell")
 topology.show_adjacency_matrix()
 node_n = topology.n
 
@@ -252,12 +252,16 @@ reward_data = []
 for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     episode_utility = 0.0
     observation = [agent.env.reset()[0] for agent in agents]
+    done = [False] * node_n
 
     for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):
         actions = []
         probs = [0]*node_n
+        t = 0
         for agent_id, agent in enumerate(agents):
-            probs[agent_id] = agent.pinet(torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device))
+            probs[agent_id] = agent.pinet(
+                torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device)
+                )
             m = Categorical(probs[agent_id])
             a = m.sample()
             actions.append(a.item())
@@ -267,15 +271,16 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
             agent.env.set_all_actions(actions)
         
         for agent_id, agent in enumerate(agents):
-            next_observation, reward, done, _, _ = agent.env.step(actions[agent_id])
-            agent.put_data((reward, probs[agent_id][0, 0, actions[agent_id]]))
+            next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
+            # agent.put_data((reward, probs[agent_id][0, 0, actions[agent_id]]))
             observation[agent_id] = next_observation
             episode_utility += reward
-
+            agent.put_data((reward, probs[agent_id][0, 0, actions[agent_id]]))
+        
     for agent in agents:
         agent.train()
     
-    writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
+    writer.add_scalar('Rewards per episodes per agent', episode_utility/len(agents), n_epi)
 
     if n_epi % print_interval == 0:
         print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")

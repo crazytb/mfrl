@@ -150,7 +150,6 @@ class MFRLEnv(gym.Env):
                     self.age = 0
                     break
                 else:
-                    
                     reward = -1
         else:
             reward = 0
@@ -183,7 +182,7 @@ class Pinet(nn.Module):
         probs = F.softmax(out, dim=2)
         m = Categorical(probs)
         action = m.sample()
-        return action.item(), h, c, m.log_prob(action), m.entropy()
+        return probs, h, c, m.log_prob(action), m.entropy()
 
     def init_hidden_state(self):
         return (torch.zeros([1, 1, self.hidden_space]), 
@@ -233,24 +232,10 @@ class Agent:
         
         self.optimizer.step()
         self.data = []
-        # R = 0
-        # loss = []
-        # returns = []
-        # self.optimizer.zero_grad()
-        # for r, log_prob in reversed(self.data):
-        #     R = r + self.gamma * R
-        #     returns.insert(0, R)
-        #     loss.append(-log_prob * R)
-        
-        # policy_loss = torch.stack(loss).sum()
-        # policy_loss.backward()
-        # self.optimizer.step()
-        # self.data = []
-
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 1000
+MAX_EPISODES = 100
 GAMMA = 0.98
 LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 3
@@ -268,7 +253,7 @@ if not os.path.exists(output_path):
 writer = SummaryWriter(output_path + "/" + "REINFORCE_DRQN" + "_" + timestamp)
 
 # Make topology
-topology = Topology(4, "dumbbell")
+topology = Topology(10, "dumbbell")
 topology.show_adjacency_matrix()
 node_n = topology.n
 
@@ -283,40 +268,41 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     observation = [agent.env.reset()[0] for agent in agents]
     h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
     c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
+    done = [False] * node_n
     
     for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):
         actions = []
+        probs = [0]*node_n
         log_probs = []
         entropies = []
+        t = 0
         for agent_id, agent in enumerate(agents):
-            a, h[agent_id], c[agent_id], log_prob, entropy = agent.pinet.sample_action(
+            probs[agent_id], h[agent_id], c[agent_id], log_prob, entropy = agent.pinet.sample_action(
                 torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
                 h[agent_id], 
                 c[agent_id]
             )
-            actions.append(a)
+            m = Categorical(probs[agent_id])
+            a = m.sample()
+            actions.append(a.item())
             log_probs.append(log_prob)
             entropies.append(entropy)
-            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': torch.exp(log_prob)[0].item()})
+            reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': probs[agent_id][0, 0, -1].item()})
         
         for agent in agents:
             agent.env.set_all_actions(actions)
         
-        reward_sum = 0
         for agent_id, agent in enumerate(agents):
-            next_observation, reward, done, _, _ = agent.env.step(actions[agent_id])
-            reward_sum += reward
+            next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
             # agent.put_data((reward, probs[agent_id][0, 0, actions[agent_id]]))
             observation[agent_id] = next_observation
             episode_utility += reward
-
-        for agent_id, agent in enumerate(agents):
-            agent.put_data((reward_sum, log_probs[agent_id], entropies[agent_id]))
-
+            agent.put_data((reward, log_probs[agent_id], entropies[agent_id]))
+            
     for agent in agents:
         agent.train()
     
-    writer.add_scalar('Rewards per episodes', episode_utility, n_epi)
+    writer.add_scalar('Rewards per episodes per agent', episode_utility/len(agents), n_epi)
 
     if n_epi % print_interval == 0:
         print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
