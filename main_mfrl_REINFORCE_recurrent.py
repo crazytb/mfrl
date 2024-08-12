@@ -301,8 +301,8 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
             
     for agent in agents:
         agent.train()
-    
-    writer.add_scalar('Rewards per episodes per agent', episode_utility/len(agents), n_epi)
+    episode_utility /= node_n
+    writer.add_scalar('Rewards per episodes per agent', episode_utility, n_epi)
 
     if n_epi % print_interval == 0:
         print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
