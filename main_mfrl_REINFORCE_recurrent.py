@@ -253,7 +253,7 @@ if not os.path.exists(output_path):
 writer = SummaryWriter(output_path + "/" + "REINFORCE_DRQN" + "_" + timestamp)
 
 # Make topology
-topology = Topology(10, "dumbbell")
+topology = Topology(4, "dumbbell")
 topology.show_adjacency_matrix()
 node_n = topology.n
 
@@ -275,7 +275,6 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         probs = [0]*node_n
         log_probs = []
         entropies = []
-        t = 0
         for agent_id, agent in enumerate(agents):
             probs[agent_id], h[agent_id], c[agent_id], log_prob, entropy = agent.pinet.sample_action(
                 torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
@@ -302,7 +301,7 @@ for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
     for agent in agents:
         agent.train()
     episode_utility /= node_n
-    writer.add_scalar('Rewards per episodes per agent', episode_utility, n_epi)
+    writer.add_scalar('Avg. Rewards per episodes', episode_utility, n_epi)
 
     if n_epi % print_interval == 0:
         print(f"# of episode :{n_epi}, avg reward : {episode_utility:.1f}")
