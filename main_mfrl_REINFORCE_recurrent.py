@@ -312,3 +312,11 @@ reward_df = pd.DataFrame(reward_data)
 df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
 df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
 df_pivot.to_csv(f'REINFORCE_DRQN_{timestamp}.csv', index=False)
+writer.close()
+
+# Save models
+model_path = 'models'
+if not os.path.exists(model_path):
+    os.makedirs(model_path)
+for i, agent in enumerate(agents):
+    save_model(agent.pinet, f'{model_path}/REINFORCE_DRQN_agent_{i}_{timestamp}.pth')

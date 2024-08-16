@@ -154,7 +154,7 @@ def save_model(model, path='default.pth'):
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 200
+MAX_EPISODES = 500
 GAMMA = 0.98
 LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 3
