@@ -15,7 +15,6 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
-GAMMA = 0.99
 
 class Topology():
     def __init__(self, n, model="random", density=1):
@@ -78,17 +77,17 @@ class Topology():
         plt.savefig(path + '/adj_graph.png')
 
 class MFRLEnv(gym.Env):
-    actions = np.array([])
-    def __init__(self, agent, topology, max_steps=300):
+    def __init__(self, agent):
         self.id = agent.id
         self.all_num = agent.topology.n
         self.adj_num = agent.get_adjacent_num()
         self.adj_ids = agent.get_adjacent_ids()
-        self.topology = topology
-        self.max_steps = max_steps
+        self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
         self.counter = 0
         self.age = 0
-        # Observation: [no tx prob, tx prob, age]
+        self.all_actions = np.zeros(self.all_num)
+        self.topology = agent.topology
+
         self.observation_space = spaces.Box(low=0, high=1, shape=(1, 3))
         self.action_space = spaces.Discrete(2)
         
@@ -98,11 +97,11 @@ class MFRLEnv(gym.Env):
         self.age = 0
         observation = np.array([[0.5, 0.5, self.age]])
         info = {}
-        MFRLEnv.actions = np.zeros(self.all_num)
+        self.all_actions = np.zeros(self.all_num)
         return observation, info
     
-    def gather_actions(self, action):
-        MFRLEnv.actions = np.array(action)
+    def set_all_actions(self, actions):
+        self.all_actions = np.array(actions)
         
     def calculate_meanfield(self):  
         if self.idle_check():
@@ -111,7 +110,7 @@ class MFRLEnv(gym.Env):
             return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
 
     def idle_check(self):
-        if all(MFRLEnv.actions[self.adj_ids] == 0):
+        if all(self.all_actions[self.adj_ids] == 0):
             return True
         else:
             return False
@@ -124,100 +123,53 @@ class MFRLEnv(gym.Env):
     
     def step(self, action):
         self.counter += 1
-        self.age += 1/self.max_steps
+        self.age += 1/MAX_STEPS
         observation = self.calculate_meanfield()
-        observation = np.append(observation, self.counter/self.max_steps)
+        observation = np.append(observation, self.age)
         observation = np.array([observation])
         if action == 1:
             adjacent_nodes = self.get_adjacent_nodes()
             for j in adjacent_nodes:
                 js_adjacent_nodes = self.get_adjacent_nodes(j)
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
-                if (np.all(MFRLEnv.actions[js_adjacent_nodes_except_ind] == 0)
-                    and MFRLEnv.actions[j] == 0):
-                    reward = np.tanh(5*self.age)
+                if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
+                    and self.all_actions[j] == 0):
+                    reward = 1
                     self.age = 0
                     break
                 else:
-                    reward = 0
+                    reward = -1
         else:
             reward = 0
         
         terminated = False
         info = {}
-        if self.counter == self.max_steps:
+        if self.counter == MAX_STEPS:
             terminated = True
         return observation, reward, terminated, False, info
-
-class Pinet(nn.Module):
-    def __init__(self, n_observations, n_actions, n_hidden=32):
-        super(Pinet, self).__init__()
-        self.fc1 = nn.Linear(n_observations, n_hidden)
-        self.fc2 = nn.LSTM(n_hidden, n_hidden, batch_first=True)
-        self.fc3 = nn.Linear(n_hidden, n_actions)
-
-    def forward(self, x, h, c):
-        x = F.relu(self.fc1(x))
-        h = h.view(h.size(0), -1)
-        c = c.view(c.size(0), -1)
-        x, (h_new, c_new) = self.fc2(x, (h, c))
-        x = self.fc3(x)
-        x = F.softmax(x, dim=1)
-        return x, h_new, c_new
-
-class TransformerEncoder(nn.Module):
-    def __init__(self, d_model, nhead, num_layers):
-        super(TransformerEncoder, self).__init__()
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)
-        
-    def forward(self, src):
-        return self.transformer_encoder(src)
-
-class Pinet_transformer(nn.Module):
-    def __init__(self, n_observations, n_actions, d_model=64, nhead=4, num_layers=2):
-        super(Pinet_transformer, self).__init__()
-        self.fc1 = nn.Linear(n_observations, d_model)
-        self.transformer = TransformerEncoder(d_model, nhead, num_layers)
-        self.fc2 = nn.Linear(d_model, n_actions)
-
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = x.unsqueeze(1)  # Add sequence dimension
-        x = self.transformer(x)
-        x = x.squeeze(1)  # Remove sequence dimension
-        x = self.fc2(x)
-        x = F.softmax(x, dim=-1)
-        return x
-
-class Agent:
-    def __init__(self, topology, id, n_observations, n_actions, gamma, max_steps, model="Pinet"):
-        self.topology = topology
-        if id >= topology.n:
-            raise ValueError("id must be less than n.")
-        else:
-            self.id = id
-        self.env = MFRLEnv(self, topology, max_steps)
-        self.data = []
-        # self.pinet = Pinet(n_observations, n_actions).to(device)
-        self.pinet = Pinet_transformer(n_observations, n_actions).to(device)
-        self.optimizer = optim.Adam(self.pinet.parameters(), lr=0.0005)
-        
-    def get_adjacent_ids(self):
-        return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
     
-    def get_adjacent_num(self):
-        return len(self.get_adjacent_ids())
+def save_model(model, path='default.pth'):
+        torch.save(model.state_dict(), path)
+
+
+# Hyperparameters
+MAX_STEPS = 300
+MAX_EPISODES = 200
+GAMMA = 0.98
+LEARNING_RATE = 0.0001
+N_OBSERVATIONS = 3
+N_ACTIONS = 2
+print_interval = 10
+ENERGY_COEFF = 1/MAX_STEPS
+ENTROPY_COEFF = 0.01
+CRITIC_COEFF = 0.5
+MAX_GRAD_NORM = 0.5
+
     
-    def put_data(self, item):
-        self.data.append(item)
-    
-    def train(self):
-        R = 0
-        self.optimizer.zero_grad()
-        for r, prob in self.data[::-1]:
-            R = r + GAMMA * R
-            loss = -torch.log(prob) * R
-            loss.backward()
-        self.optimizer.step()
-        self.data = []
+# Make topology
+topology = Topology(8, "dumbbell")
+topology.show_adjacency_matrix()
+node_n = topology.n
+
+# DataFrame to store rewards
+reward_data = []
