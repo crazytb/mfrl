@@ -167,9 +167,10 @@ MAX_GRAD_NORM = 0.5
 
     
 # Make topology
-topology = Topology(8, "dumbbell")
-topology.show_adjacency_matrix()
-node_n = topology.n
+node_n = 8
+method = "dumbbell"
+topology = Topology(node_n, method)
+
 
 # DataFrame to store rewards
 reward_data = []
