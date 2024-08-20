@@ -36,6 +36,32 @@ class Pinet(nn.Module):
         self.lstm = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
         self.actor = nn.Linear(self.hidden_space, n_actions)
         self.critic = nn.Linear(self.hidden_space, 1)
+        
+        self.init_weights()
+        
+    def init_weights(self):
+        # fc1 layer (ReLU activation)
+        nn.init.kaiming_normal_(self.fc1.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.constant_(self.fc1.bias, 0)
+
+        # LSTM layer
+        for name, param in self.lstm.named_parameters():
+            if 'weight' in name:
+                nn.init.orthogonal_(param)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+                # Set forget gate bias to 1
+                n = param.size(0)
+                start, end = n//4, n//2
+                param.data[start:end].fill_(1.)
+
+        # Actor layer
+        nn.init.kaiming_normal_(self.actor.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.constant_(self.actor.bias, 0)
+
+        # Critic layer
+        nn.init.kaiming_normal_(self.critic.weight, mode='fan_in', nonlinearity='relu')
+        nn.init.constant_(self.critic.bias, 0)
 
     def forward(self, x, h, c):
         x = F.relu(self.fc1(x))
@@ -49,7 +75,7 @@ class Pinet(nn.Module):
         probs = F.softmax(policy, dim=2)
         m = Categorical(probs)
         action = m.sample()
-        return probs, m.log_prob(action), m.entropy(), value, h, c
+        return probs, h, c, m.log_prob(action), m.entropy(), value
 
     def init_hidden_state(self):
         return (torch.zeros([1, 1, self.hidden_space], device=device), 
@@ -128,9 +154,10 @@ if __name__ == "__main__":
             log_probs = []
             entropies = []
             values = []
+            probs = [0]*node_n
 
             for agent_id, agent in enumerate(agents):
-                probs, log_prob, entropy, value, h[agent_id], c[agent_id] = agent.pinet.sample_action(
+                probs[agent_id], h[agent_id], c[agent_id], log_prob, entropy, value = agent.pinet.sample_action(
                     torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
                     h[agent_id], 
                     c[agent_id]

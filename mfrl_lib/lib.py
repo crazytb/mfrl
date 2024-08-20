@@ -138,7 +138,7 @@ class MFRLEnv(gym.Env):
                     self.age = 0
                     break
                 else:
-                    reward = -1
+                    reward = -1*ENERGY_COEFF
         else:
             reward = 0
         

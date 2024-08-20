@@ -44,11 +44,11 @@ class Pinet(nn.Module):
         return x
 
     def sample_action(self, obs):
-        obs = obs.unsqueeze(0)
+        # obs = obs.unsqueeze(0)
         out = self.forward(obs)
         m = Categorical(out)
         action = m.sample()
-        return action.item()
+        return out
     
 class Agent:
     def __init__(self, topology, id):
@@ -115,7 +115,7 @@ if __name__ == "__main__":
             actions = []
             probs = [0]*node_n
             for agent_id, agent in enumerate(agents):
-                probs[agent_id] = agent.pinet(
+                probs[agent_id] = agent.pinet.sample_action(
                     torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device)
                     )
                 m = Categorical(probs[agent_id])
