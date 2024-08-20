@@ -23,7 +23,7 @@ else:
 topology.show_adjacency_matrix()
 
 # suffix = "20240819_022826"
-suffix = None
+suffix = "20240820_174021"
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
     if simmode == "RA2C":
@@ -36,11 +36,11 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     for i in range(topology.n):
         if simmode == "RA2C":
             # agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}.pth", map_location=device))
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240819_022826.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240820_174021.pth", map_location=device))  # 20240819_022826
         elif simmode == "recurrent":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240820_174029.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240820_174032.pth", map_location=device))
         
     df = pd.DataFrame()
     states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
@@ -87,11 +87,11 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     return df
 
 # Set the simulation mode
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+# timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 for mode in ["RA2C", "recurrent", "vanilla", "fixedprob"]:
     df = test_model(simmode=mode, max_episodes=10, max_steps=300)
-    filename = "test_log_" + mode + "_" + timestamp + ".csv"
+    filename = "test_log_" + mode + "_" + suffix + ".csv"
     df.to_csv(filename)
     
     
@@ -112,7 +112,7 @@ modes = ["RA2C", "recurrent", "vanilla", "fixedprob"]
 dataframes = {}
 
 for mode in modes:
-    filename = f"test_log_{mode}_{timestamp}.csv"
+    filename = f"test_log_{mode}_{suffix}.csv"
     dataframes[mode] = load_data(filename)
 
 # Create the plot
@@ -137,7 +137,7 @@ for i, mode in enumerate(modes):
 plt.tight_layout()
 
 # Save the figure
-plt.savefig(f'aoi_trend_comparison_{timestamp}.png', dpi=300, bbox_inches='tight')
+plt.savefig(f'aoi_trend_comparison_{suffix}.png', dpi=300, bbox_inches='tight')
 plt.close()
 
-print(f"Figure saved as aoi_trend_comparison_{timestamp}.png")
+print(f"Figure saved as aoi_trend_comparison_{suffix}.png")
