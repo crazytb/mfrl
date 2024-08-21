@@ -23,7 +23,7 @@ else:
 topology.show_adjacency_matrix()
 
 # suffix = "20240819_022826"
-suffix = "20240820_174021"
+suffix = None
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
     if simmode == "RA2C":
@@ -35,12 +35,11 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Load the trained models
     for i in range(topology.n):
         if simmode == "RA2C":
-            # agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}.pth", map_location=device))
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240820_174021.pth", map_location=device))  # 20240819_022826
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240822_011622.pth", map_location=device))  # 20240819_022826
         elif simmode == "recurrent":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240820_174029.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240822_011624.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240820_174032.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240822_011627.pth", map_location=device))
         
     df = pd.DataFrame()
     states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
@@ -90,8 +89,8 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
 # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 for mode in ["RA2C", "recurrent", "vanilla", "fixedprob"]:
-    df = test_model(simmode=mode, max_episodes=10, max_steps=300)
-    filename = "test_log_" + mode + "_" + suffix + ".csv"
+    df = test_model(simmode=mode, max_episodes=50, max_steps=300)
+    filename = "test_log_" + mode + "_" + "final" + ".csv"
     df.to_csv(filename)
     
     
