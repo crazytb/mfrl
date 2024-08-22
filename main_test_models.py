@@ -10,7 +10,47 @@ from tqdm import tqdm
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
+import glob
 
+def load_model(filepath, device):
+    return torch.load(filepath, map_location=device)
+
+def average_models(model_files, device='cpu'):
+    # Load the first model to get the structure
+    base_model = load_model(model_files[0], device)
+    
+    # Initialize a dict to store the sum of parameters
+    averaged_params = {}
+    for name, param in base_model.items():
+        averaged_params[name] = torch.zeros_like(param)
+
+    # Sum up the parameters from all models
+    for file in model_files:
+        model = load_model(file, device)
+        for name, param in model.items():
+            averaged_params[name] += param
+
+    # Divide by the number of models to get the average
+    for name in averaged_params:
+        averaged_params[name] /= len(model_files)
+
+    return averaged_params
+
+def fuse_ra2c_models(model_pattern, output_file, device='cpu'):
+    # Get all model files matching the pattern
+    model_files = glob.glob(model_pattern)
+    
+    if not model_files:
+        raise ValueError(f"No model files found matching the pattern: {model_pattern}")
+
+    print(f"Found {len(model_files)} model files.")
+
+    # Average the models
+    averaged_model = average_models(model_files, device)
+
+    # Save the averaged model
+    torch.save(averaged_model, output_file)
+    print(f"Fused model saved to {output_file}")
 
 # if GPU is to be used
 if torch.cuda.is_available():
@@ -26,7 +66,7 @@ topology.show_adjacency_matrix()
 suffix = None
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
-    if simmode == "RA2C":
+    if simmode == "RA2C" or simmode == "RA2C_fed":
         agents = [RA2C.Agent(topology, i) for i in range(node_n)]
     elif simmode == "recurrent":
         agents = [Recurrent.Agent(topology, i) for i in range(node_n)]
@@ -36,11 +76,17 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     for i in range(topology.n):
         if simmode == "RA2C":
             agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240822_011622.pth", map_location=device))  # 20240819_022826
+        elif simmode == "RA2C_fed":
+            model_pattern = f"models/RA2C_agent_*_20240822_011622.pth"
+            output_file = f"models/RA2C_fed_20240822_011622.pth"
+            fuse_ra2c_models(model_pattern, output_file, device)
+            agents[i].pinet.load_state_dict(torch.load(output_file, map_location=device))
         elif simmode == "recurrent":
             agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240822_011624.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
             agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240822_011627.pth", map_location=device))
-        
+    
+    total_reward = 0
     df = pd.DataFrame()
     states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
     probs = [None]*node_n
@@ -55,7 +101,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
             next_states = []
             for i in range(node_n):
                 with torch.no_grad():
-                    if simmode == "RA2C":
+                    if simmode == "RA2C" or simmode == "RA2C_fed":
                         probs[i], h[i], c[i], _, _, _ = agents[i].pinet.sample_action(states[i], h[i], c[i])
                     elif simmode == "recurrent":
                         probs[i], h[i], c[i], _, _ = agents[i].pinet.sample_action(states[i], h[i], c[i])
@@ -83,60 +129,14 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
             df_reward = pd.DataFrame(data=[[reward_sum]], columns=['reward'])
             df1 = pd.concat([df_index, df_aoi, df_action, df_reward], axis=1)
             df = pd.concat([df, df1])
-    return df
-
-# Set the simulation mode
-# timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        total_reward += reward_sum
+    average_reward = total_reward/max_episodes
+    print(f"Average reward for {simmode}: {average_reward:.4f}")
+    return df, average_reward
 
 for mode in ["RA2C", "recurrent", "vanilla", "fixedprob"]:
-    df = test_model(simmode=mode, max_episodes=50, max_steps=300)
+    df, avg_reward = test_model(simmode=mode, max_episodes=20, max_steps=300)
     filename = "test_log_" + mode + "_" + "final" + ".csv"
     df.to_csv(filename)
-    
-    
-# Set the style for the plot
-sns.set_theme(style="whitegrid")
-sns.set_palette("husl")
-
-# Function to load and process data
-def load_data(filename):
-    df = pd.read_csv(filename)
-    aoi_columns = [col for col in df.columns if col.startswith('aoi_')]
-    df['mean_aoi'] = df[aoi_columns].mean(axis=1)
-    df['smoothed_mean_aoi'] = df.groupby('episode')['mean_aoi'].transform(lambda x: x.rolling(window=20, min_periods=1).mean())
-    return df
-
-# Load data for each mode
-modes = ["RA2C", "recurrent", "vanilla", "fixedprob"]
-dataframes = {}
-
-for mode in modes:
-    filename = f"test_log_{mode}_{suffix}.csv"
-    dataframes[mode] = load_data(filename)
-
-# Create the plot
-plt.figure(figsize=(12, 6))
-
-for mode in modes:
-    df = dataframes[mode]
-    plt.plot(df['epoch'], df['smoothed_mean_aoi'], label=mode.capitalize())
-
-plt.xlabel('Time Step')
-plt.ylabel('Mean AoI')
-plt.title('Comparison of Mean AoI Trends')
-plt.legend()
-plt.grid(True, linestyle='--', alpha=0.7)
-
-# Add overall mean AoI for each mode
-for i, mode in enumerate(modes):
-    mean_aoi = dataframes[mode]['mean_aoi'].mean()
-    plt.text(0.02, 0.95 - i*0.05, f'{mode.capitalize()} Overall Mean AoI: {mean_aoi:.4f}', 
-             transform=plt.gca().transAxes, fontsize=10, verticalalignment='top')
-
-plt.tight_layout()
-
-# Save the figure
-plt.savefig(f'aoi_trend_comparison_{suffix}.png', dpi=300, bbox_inches='tight')
-plt.close()
-
-print(f"Figure saved as aoi_trend_comparison_{suffix}.png")
+    print(f"Results for {mode} saved to {filename}")
+    print(f"Final average reward for {mode}: {avg_reward:.4f}\n")

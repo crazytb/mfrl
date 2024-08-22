@@ -135,6 +135,7 @@ class MFRLEnv(gym.Env):
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
                     reward = 1
+                    # reward = np.tanh(5*self.age)
                     self.age = 0
                     break
                 else:
@@ -154,9 +155,9 @@ def save_model(model, path='default.pth'):
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 500
+MAX_EPISODES = 200
 GAMMA = 0.98
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
 N_OBSERVATIONS = 3
 N_ACTIONS = 2
 print_interval = 10
