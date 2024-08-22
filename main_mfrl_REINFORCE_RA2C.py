@@ -32,8 +32,10 @@ class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
         self.hidden_space = 32
-        self.fc1 = nn.Linear(n_observations, self.hidden_space)
-        self.lstm = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
+        # self.fc1 = nn.Linear(n_observations, self.hidden_space)
+        # self.lstm = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
+        self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
+        self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
         self.actor = nn.Linear(self.hidden_space, n_actions)
         self.critic = nn.Linear(self.hidden_space, 1)
         
@@ -64,8 +66,8 @@ class Pinet(nn.Module):
         nn.init.constant_(self.critic.bias, 0)
 
     def forward(self, x, h, c):
-        x = F.relu(self.fc1(x))
         x, (h_new, c_new) = self.lstm(x, (h, c))
+        x = F.relu(self.fc1(x))
         policy = self.actor(x)
         value = self.critic(x)
         return policy, value, h_new, c_new
