@@ -1,6 +1,8 @@
 # https://github.com/keep9oing/DRQN-Pytorch-CartPole-v1
 # https://ropiens.tistory.com/80
 # https://github.com/chingyaoc/pytorch-REINFORCE/tree/master
+# https://blog.naver.com/songblue61/221853600720
+# While input training, x.shape: ([1, 300, 3]), hidden[0].shape: ([1, 1, 32]), hidden[1].shape: ([1, 1, 32])
 
 import os
 import numpy as np
@@ -55,7 +57,7 @@ class Pinet(nn.Module):
 
     def pi(self, x, hidden):
         x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, self.hidden_space)
+        # x = x.view(-1, 1, self.hidden_space)
         x, lstm_hidden = self.lstm(x, hidden)
         x = self.actor(x)
         prob = F.softmax(x, dim=2)
@@ -63,7 +65,7 @@ class Pinet(nn.Module):
     
     def v(self, x, hidden):
         x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, self.hidden_space)
+        # x = x.view(-1, 1, self.hidden_space)
         x, lstm_hidden = self.lstm(x, hidden)
         v = self.critic(x)
         return v
@@ -107,7 +109,7 @@ class Agent:
         advantage = delta.detach()
 
         pi, _ = self.pinet.pi(s, h)
-        pi_a = pi.squeeze(1).gather(1, a)
+        pi_a = pi.squeeze(0).gather(1, a)
         loss = -torch.log(pi_a) * advantage.unsqueeze(1) + F.smooth_l1_loss(v_s, td_target.detach())
 
         self.optimizer.zero_grad()
@@ -134,6 +136,8 @@ class Agent:
         s_prime = torch.tensor(s_prime_lst, dtype=torch.float).to(device)
         done_mask = torch.tensor(done_lst, dtype=torch.float).to(device)
         
+        s = s.view([1, len(self.data), -1])
+        s_prime = s_prime.view([1, len(self.data), -1])
         return s, a, r, s_prime, done_mask
 
 if __name__ == "__main__":
