@@ -1,6 +1,7 @@
 import main_mfrl_REINFORCE_vanilla as Vanilla
 import main_mfrl_REINFORCE_recurrent as Recurrent
 import main_mfrl_REINFORCE_RA2C as RA2C
+import main_mfrl_REINFORCE_A2C as A2C
 from mfrl_lib.lib import *
 
 import torch
@@ -68,23 +69,29 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
     if simmode == "RA2C" or simmode == "RA2C_fed":
         agents = [RA2C.Agent(topology, i) for i in range(node_n)]
+    elif simmode == "A2C":
+        agents = [A2C.Agent(topology, i) for i in range(node_n)]
     elif simmode == "recurrent":
         agents = [Recurrent.Agent(topology, i) for i in range(node_n)]
     elif simmode == "vanilla" or simmode == "fixedprob":
         agents = [Vanilla.Agent(topology, i) for i in range(node_n)]
+    else:
+        raise ValueError("Invalid simmode.")
     # Load the trained models
     for i in range(topology.n):
         if simmode == "RA2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240822_011622.pth", map_location=device))  # 20240819_022826
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240822_185310.pth", map_location=device))  # 20240819_022826
         elif simmode == "RA2C_fed":
-            model_pattern = f"models/RA2C_agent_*_20240822_011622.pth"
-            output_file = f"models/RA2C_fed_20240822_011622.pth"
+            model_pattern = f"models/RA2C_agent_*_20240822_185310.pth"
+            output_file = f"models/RA2C_fed_20240822_185310.pth"
             fuse_ra2c_models(model_pattern, output_file, device)
             agents[i].pinet.load_state_dict(torch.load(output_file, map_location=device))
+        elif simmode == "A2C":
+            agents[i].pinet.load_state_dict(torch.load(f"models/A2C_agent_{i}_20240822_201033.pth", map_location=device))
         elif simmode == "recurrent":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240822_011624.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240822_185311.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240822_011627.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240822_185313.pth", map_location=device))
     
     total_reward = 0
     df = pd.DataFrame()
@@ -103,6 +110,8 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
                 with torch.no_grad():
                     if simmode == "RA2C" or simmode == "RA2C_fed":
                         probs[i], h[i], c[i], _, _, _ = agents[i].pinet.sample_action(states[i], h[i], c[i])
+                    elif simmode == "A2C":
+                        probs[i], _, _, _ = agents[i].pinet.sample_action(states[i])
                     elif simmode == "recurrent":
                         probs[i], h[i], c[i], _, _ = agents[i].pinet.sample_action(states[i], h[i], c[i])
                     elif simmode == "vanilla":
@@ -134,7 +143,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     print(f"Average reward for {simmode}: {average_reward:.4f}")
     return df, average_reward
 
-for mode in ["RA2C", "recurrent", "vanilla", "fixedprob"]:
+for mode in ["RA2C", "A2C", "recurrent", "vanilla", "fixedprob"]:
     df, avg_reward = test_model(simmode=mode, max_episodes=20, max_steps=300)
     filename = "test_log_" + mode + "_" + "final" + ".csv"
     df.to_csv(filename)
