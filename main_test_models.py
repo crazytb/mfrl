@@ -143,7 +143,8 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     print(f"Average reward for {simmode}: {average_reward:.4f}")
     return df, average_reward
 
-for mode in ["RA2C", "A2C", "recurrent", "vanilla", "fixedprob"]:
+# for mode in ["RA2C", "A2C", "recurrent", "vanilla", "fixedprob"]:
+for mode in ["RA2C_fed"]:
     df, avg_reward = test_model(simmode=mode, max_episodes=20, max_steps=300)
     filename = "test_log_" + mode + "_" + "final" + ".csv"
     df.to_csv(filename)
