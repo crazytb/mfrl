@@ -123,6 +123,7 @@ class MFRLEnv(gym.Env):
     
     def step(self, action):
         self.counter += 1
+        max_aoi = 0
         self.age += 1/MAX_STEPS
         observation = self.calculate_meanfield()
         observation = np.append(observation, self.age)
@@ -135,18 +136,19 @@ class MFRLEnv(gym.Env):
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
                     reward = 1
-                    # reward = np.tanh(5*self.age)
                     self.age = 0
                     break
                 else:
                     reward = -1*ENERGY_COEFF
         else:
             reward = 0
-        
+        # Save maximum AoI value during the episode
+        max_aoi = max(self.age, max_aoi)
         terminated = False
         info = {}
         if self.counter == MAX_STEPS:
             terminated = True
+            reward -= MAX_STEPS*max_aoi
         return observation, reward, terminated, False, info
     
 def save_model(model, path='default.pth'):
