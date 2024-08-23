@@ -155,7 +155,7 @@ class MFRLEnv(gym.Env):
         info = {}
         if self.counter == MAX_STEPS:
             terminated = True
-            # reward -= MAX_STEPS*np.max(self.max_aoi_set)
+            reward -= MAX_STEPS*np.max(self.max_aoi_set)
         return observation, reward, terminated, False, info
     
 def save_model(model, path='default.pth'):
