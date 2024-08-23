@@ -126,7 +126,7 @@ class MFRLEnv(gym.Env):
         max_aoi = 0
         self.age += 1/MAX_STEPS
         observation = self.calculate_meanfield()
-        observation = np.append(observation, self.age, self.counter/MAX_STEPS)
+        observation = np.append(observation, [self.age, self.counter/MAX_STEPS])
         observation = np.array([observation])
         if action == 1:
             adjacent_nodes = self.get_adjacent_nodes()
@@ -160,7 +160,7 @@ MAX_STEPS = 300
 MAX_EPISODES = 200
 GAMMA = 0.98
 LEARNING_RATE = 0.0001
-N_OBSERVATIONS = 3
+N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
 ENERGY_COEFF = 0.1

@@ -140,28 +140,28 @@ class Agent:
         s_prime = s_prime.view([1, len(self.data), -1])
         return s, a, r, s_prime, done_mask
     
-    def make_batch(self):
-        transitions = np.array(self.data, dtype=object)
-        s, a, r, s_prime, done = transitions.T
+    # def make_batch(self):
+    #     transitions = np.array(self.data, dtype=object)
+    #     s, a, r, s_prime, done = transitions.T
 
-        s = np.stack(s)
-        s_prime = np.stack(s_prime)
-        a = np.array(a)[:, np.newaxis]
-        r = np.array(r)[:, np.newaxis]
-        done_mask = np.array([0 if d else 1 for d in done])[:, np.newaxis]
+    #     s = np.stack(s)
+    #     s_prime = np.stack(s_prime)
+    #     a = np.array(a)[:, np.newaxis]
+    #     r = np.array(r)[:, np.newaxis]
+    #     done_mask = np.array([0 if d else 1 for d in done])[:, np.newaxis]
 
-        s = torch.FloatTensor(s).to(device)
-        a = torch.LongTensor(a).to(device)
-        r = torch.FloatTensor(r).to(device)
-        s_prime = torch.FloatTensor(s_prime).to(device)
-        done_mask = torch.FloatTensor(done_mask).to(device)
+    #     s = torch.FloatTensor(s).to(device)
+    #     a = torch.LongTensor(a).to(device)
+    #     r = torch.FloatTensor(r).to(device)
+    #     s_prime = torch.FloatTensor(s_prime).to(device)
+    #     done_mask = torch.FloatTensor(done_mask).to(device)
 
-        s = s.view(1, len(self.data), -1)
-        s_prime = s_prime.view(1, len(self.data), -1)
+    #     s = s.view(1, len(self.data), -1)
+    #     s_prime = s_prime.view(1, len(self.data), -1)
 
-        self.data = []  # Clear the data after processing
+    #     self.data = []  # Clear the data after processing
 
-        return s, a, r, s_prime, done_mask
+    #     return s, a, r, s_prime, done_mask
 
 if __name__ == "__main__":
     # Summarywriter setting
