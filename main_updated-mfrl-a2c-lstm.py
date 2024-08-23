@@ -34,8 +34,10 @@ class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
         self.hidden_space = 32
-        self.fc1 = nn.Linear(n_observations, self.hidden_space)
-        self.lstm = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
+        # self.fc1 = nn.Linear(n_observations, self.hidden_space)
+        # self.lstm = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
+        self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
+        self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
         self.actor = nn.Linear(self.hidden_space, n_actions)
         self.critic = nn.Linear(self.hidden_space, 1)
         
@@ -56,17 +58,17 @@ class Pinet(nn.Module):
                 param.data[start:end].fill_(1.)
 
     def pi(self, x, hidden):
-        x = F.relu(self.fc1(x))
         # x = x.view(-1, 1, self.hidden_space)
         x, lstm_hidden = self.lstm(x, hidden)
+        x = F.relu(self.fc1(x))
         x = self.actor(x)
         prob = F.softmax(x, dim=2)
         return prob, lstm_hidden
     
     def v(self, x, hidden):
-        x = F.relu(self.fc1(x))
         # x = x.view(-1, 1, self.hidden_space)
         x, lstm_hidden = self.lstm(x, hidden)
+        x = F.relu(self.fc1(x))
         v = self.critic(x)
         return v
 
@@ -169,7 +171,7 @@ if __name__ == "__main__":
     output_path = 'outputs'
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    writer = SummaryWriter(output_path + "/" + "RA2C" + "_" + timestamp)
+    writer = SummaryWriter(output_path + "/" + "updated_RA2C" + "_" + timestamp)
 
     # Make agents
     agents = [Agent(topology, i) for i in range(node_n)]
@@ -185,6 +187,7 @@ if __name__ == "__main__":
         
         for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):
             actions = []
+            max_aoi = []
             for agent_id, agent in enumerate(agents):
                 prob, h[agent_id], c[agent_id], log_prob, entropy, value = agent.pinet.sample_action(
                     torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
@@ -198,12 +201,14 @@ if __name__ == "__main__":
             
             for agent in agents:
                 agent.env.set_all_actions(actions)
+                max_aoi.append(agent.env.get_maxaoi())
             
             for agent_id, agent in enumerate(agents):
+                agent.env.set_max_aoi(max_aoi)
                 next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
                 observation[agent_id] = next_observation
                 episode_utility += reward
-                agent.put_data((observation[agent_id], actions[agent_id], reward/100.0, next_observation, done[agent_id]))
+                agent.put_data((observation[agent_id], actions[agent_id], reward, next_observation, done[agent_id]))
                 
             if all(done):
                 break
@@ -220,7 +225,7 @@ if __name__ == "__main__":
     reward_df = pd.DataFrame(reward_data)
     df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
     df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-    df_pivot.to_csv(f'RA2C_{timestamp}.csv', index=False)
+    df_pivot.to_csv(f'updated_RA2C_{timestamp}.csv', index=False)
     writer.close()
 
     # Save models
@@ -228,4 +233,4 @@ if __name__ == "__main__":
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     for i, agent in enumerate(agents):
-        save_model(agent.pinet, f'{model_path}/RA2C_agent_{i}_{timestamp}.pth')
+        save_model(agent.pinet, f'{model_path}/updated_RA2C_agent_{i}_{timestamp}.pth')

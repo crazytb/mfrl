@@ -85,6 +85,7 @@ class MFRLEnv(gym.Env):
         self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
         self.counter = 0
         self.age = 0
+        self.max_aoi = 0
         self.all_actions = np.zeros(self.all_num)
         self.topology = agent.topology
 
@@ -95,6 +96,7 @@ class MFRLEnv(gym.Env):
         super().reset(seed=seed)
         self.counter = 0
         self.age = 0
+        self.max_aoi = 0
         observation = np.array([[0.5, 0.5, self.age, self.counter/MAX_STEPS]])
         info = {}
         self.all_actions = np.zeros(self.all_num)
@@ -102,6 +104,12 @@ class MFRLEnv(gym.Env):
     
     def set_all_actions(self, actions):
         self.all_actions = np.array(actions)
+        
+    def get_maxaoi(self):
+        return self.max_aoi
+    
+    def set_max_aoi(self, max_aoi):
+        self.max_aoi_set = max_aoi
         
     def calculate_meanfield(self):  
         if self.idle_check():
@@ -123,7 +131,6 @@ class MFRLEnv(gym.Env):
     
     def step(self, action):
         self.counter += 1
-        max_aoi = 0
         self.age += 1/MAX_STEPS
         observation = self.calculate_meanfield()
         observation = np.append(observation, [self.age, self.counter/MAX_STEPS])
@@ -143,12 +150,12 @@ class MFRLEnv(gym.Env):
         else:
             reward = 0
         # Save maximum AoI value during the episode
-        max_aoi = max(self.age, max_aoi)
+        self.max_aoi = max(self.age, self.max_aoi)
         terminated = False
         info = {}
         if self.counter == MAX_STEPS:
             terminated = True
-            reward -= MAX_STEPS*max_aoi
+            # reward -= MAX_STEPS*np.max(self.max_aoi_set)
         return observation, reward, terminated, False, info
     
 def save_model(model, path='default.pth'):
@@ -157,13 +164,13 @@ def save_model(model, path='default.pth'):
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 200
+MAX_EPISODES = 100
 GAMMA = 0.98
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.001
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
-ENERGY_COEFF = 0.1
+ENERGY_COEFF = 1
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5

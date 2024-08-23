@@ -16,7 +16,7 @@ import glob
 def load_model(filepath, device):
     return torch.load(filepath, map_location=device)
 
-def average_models(model_files, device='cpu'):
+def averaging_models(model_files, device='cpu'):
     # Load the first model to get the structure
     base_model = load_model(model_files[0], device)
     
@@ -47,7 +47,7 @@ def fuse_ra2c_models(model_pattern, output_file, device='cpu'):
     print(f"Found {len(model_files)} model files.")
 
     # Average the models
-    averaged_model = average_models(model_files, device)
+    averaged_model = averaging_models(model_files, device)
 
     # Save the averaged model
     torch.save(averaged_model, output_file)
@@ -63,8 +63,6 @@ else:
 
 topology.show_adjacency_matrix()
 
-# suffix = "20240819_022826"
-suffix = None
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
     if simmode == "RA2C" or simmode == "RA2C_fed":
@@ -80,18 +78,18 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Load the trained models
     for i in range(topology.n):
         if simmode == "RA2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240822_185310.pth", map_location=device))  # 20240819_022826
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240823_174934.pth", map_location=device))  # 20240819_022826
         elif simmode == "RA2C_fed":
-            model_pattern = f"models/RA2C_agent_*_20240822_185310.pth"
-            output_file = f"models/RA2C_fed_20240822_185310.pth"
+            model_pattern = f"models/RA2C_agent_*_20240823_174934.pth"
+            output_file = f"models/RA2C_fed_20240823_174934.pth"
             fuse_ra2c_models(model_pattern, output_file, device)
             agents[i].pinet.load_state_dict(torch.load(output_file, map_location=device))
         elif simmode == "A2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/A2C_agent_{i}_20240822_201033.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/A2C_agent_{i}_20240823_174937.pth", map_location=device))
         elif simmode == "recurrent":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240822_185311.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240823_174940.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240822_185313.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240823_174942.pth", map_location=device))
     
     total_reward = 0
     df = pd.DataFrame()
@@ -143,10 +141,10 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     print(f"Average reward for {simmode}: {average_reward:.4f}")
     return df, average_reward
 
-# for mode in ["RA2C", "A2C", "recurrent", "vanilla", "fixedprob"]:
-for mode in ["RA2C_fed"]:
+suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+for mode in ["RA2C", "RA2C_fed", "A2C", "recurrent", "vanilla", "fixedprob"]:
     df, avg_reward = test_model(simmode=mode, max_episodes=20, max_steps=300)
-    filename = "test_log_" + mode + "_" + "final" + ".csv"
+    filename = "test_log_" + mode + "_" + suffix + ".csv"
     df.to_csv(filename)
     print(f"Results for {mode} saved to {filename}")
     print(f"Final average reward for {mode}: {avg_reward:.4f}\n")

@@ -120,6 +120,7 @@ if __name__ == "__main__":
 
         for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):
             actions = []
+            max_aoi = []
             log_probs = []
             entropies = []
             values = []
@@ -139,8 +140,10 @@ if __name__ == "__main__":
             
             for agent in agents:
                 agent.env.set_all_actions(actions)
+                max_aoi.append(agent.env.get_maxaoi())
             
             for agent_id, agent in enumerate(agents):
+                agent.env.set_max_aoi(max_aoi)
                 next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
                 # agent.put_data((reward, probs[agent_id][0, 0, actions[agent_id]]))
                 observation[agent_id] = next_observation
