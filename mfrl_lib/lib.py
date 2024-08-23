@@ -88,14 +88,14 @@ class MFRLEnv(gym.Env):
         self.all_actions = np.zeros(self.all_num)
         self.topology = agent.topology
 
-        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 3))
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 4))
         self.action_space = spaces.Discrete(2)
         
     def reset(self, seed=None):
         super().reset(seed=seed)
         self.counter = 0
         self.age = 0
-        observation = np.array([[0.5, 0.5, self.age]])
+        observation = np.array([[0.5, 0.5, self.age, self.counter/MAX_STEPS]])
         info = {}
         self.all_actions = np.zeros(self.all_num)
         return observation, info
@@ -126,7 +126,7 @@ class MFRLEnv(gym.Env):
         max_aoi = 0
         self.age += 1/MAX_STEPS
         observation = self.calculate_meanfield()
-        observation = np.append(observation, self.age)
+        observation = np.append(observation, self.age, self.counter/MAX_STEPS)
         observation = np.array([observation])
         if action == 1:
             adjacent_nodes = self.get_adjacent_nodes()

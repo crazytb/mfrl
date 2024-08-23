@@ -2,7 +2,7 @@
 # https://ropiens.tistory.com/80
 # https://github.com/chingyaoc/pytorch-REINFORCE/tree/master
 # https://blog.naver.com/songblue61/221853600720
-# While input training, x.shape: ([1, 300, 3]), hidden[0].shape: ([1, 1, 32]), hidden[1].shape: ([1, 1, 32])
+# While input training, x.shape: ([1, 300, 4]), hidden[0].shape: ([1, 1, 32]), hidden[1].shape: ([1, 1, 32])
 
 import os
 import numpy as np
