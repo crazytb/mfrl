@@ -34,8 +34,6 @@ class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
         self.hidden_space = 32
-        # self.fc1 = nn.Linear(n_observations, self.hidden_space)
-        # self.lstm = nn.LSTM(self.hidden_space, self.hidden_space, batch_first=True)
         self.lstm = nn.LSTM(n_observations, self.hidden_space, batch_first=True)
         self.fc1 = nn.Linear(self.hidden_space, self.hidden_space)
         self.actor = nn.Linear(self.hidden_space, n_actions)
@@ -58,7 +56,6 @@ class Pinet(nn.Module):
                 param.data[start:end].fill_(1.)
 
     def pi(self, x, hidden):
-        # x = x.view(-1, 1, self.hidden_space)
         x, lstm_hidden = self.lstm(x, hidden)
         x = F.relu(self.fc1(x))
         x = self.actor(x)
@@ -66,7 +63,6 @@ class Pinet(nn.Module):
         return prob, lstm_hidden
     
     def v(self, x, hidden):
-        # x = x.view(-1, 1, self.hidden_space)
         x, lstm_hidden = self.lstm(x, hidden)
         x = F.relu(self.fc1(x))
         v = self.critic(x)

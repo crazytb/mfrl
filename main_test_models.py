@@ -78,32 +78,32 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Load the trained models
     for i in range(topology.n):
         if simmode == "RA2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_agent_{i}_20240823_174934.pth", map_location=device))  # 20240819_022826
+            agents[i].pinet.load_state_dict(torch.load(f"models/updated_RA2C_agent_{i}_20240826_012851.pth", map_location=device))  # 20240819_022826
         elif simmode == "RA2C_fed":
             model_pattern = f"models/RA2C_agent_*_20240823_174934.pth"
             output_file = f"models/RA2C_fed_20240823_174934.pth"
             fuse_ra2c_models(model_pattern, output_file, device)
             agents[i].pinet.load_state_dict(torch.load(output_file, map_location=device))
         elif simmode == "A2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/A2C_agent_{i}_20240823_174937.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/updated_A2C_agent_{i}_20240826_012852.pth", map_location=device))
         elif simmode == "recurrent":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_DRQN_agent_{i}_20240823_174940.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/updated_REINFORCE_DRQN_agent_{i}__.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
-            agents[i].pinet.load_state_dict(torch.load(f"models/REINFORCE_vanilla_agent_{i}_20240823_174942.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/updated_reinforce_agent_{i}_20240826_012854.pth", map_location=device))
     
     total_reward = 0
     df = pd.DataFrame()
-    states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
-    probs = [None]*node_n
     for n_epi in tqdm(range(max_episodes)):
+        states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device) for agent in agents]
+        probs = [None]*node_n
         reward_sum = 0
-        aoi_all = [0]*node_n
         h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
         c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
         for t in range(max_steps):
             # Calculate the action for each agent
             actions = []
             next_states = []
+            aoi_all = []
             for i in range(node_n):
                 with torch.no_grad():
                     if simmode == "RA2C" or simmode == "RA2C_fed":
@@ -124,10 +124,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
                 agents[i].env.set_all_actions(actions)
                 next_state, reward_inst, _, _, _ = agents[i].env.step(actions[i])
                 next_states.append(torch.from_numpy(next_state.astype('float32')).unsqueeze(0).to(device))
-                if reward_inst > 0:
-                    aoi_all[i] = 0
-                else:
-                    aoi_all[i] += 1/MAX_STEPS
+                aoi_all.append(agents[i].env.age)
                 reward_sum += reward_inst
             states = next_states
             df_index = pd.DataFrame(data=[[n_epi, t]], columns=['episode', 'epoch'])
@@ -142,8 +139,9 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     return df, average_reward
 
 suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
-for mode in ["RA2C", "RA2C_fed", "A2C", "recurrent", "vanilla", "fixedprob"]:
-    df, avg_reward = test_model(simmode=mode, max_episodes=20, max_steps=300)
+# for mode in ["RA2C", "RA2C_fed", "A2C", "recurrent", "vanilla", "fixedprob"]:
+for mode in ["RA2C", "RA2C_fed", "A2C", "vanilla", "fixedprob"]:
+    df, avg_reward = test_model(simmode=mode, max_episodes=10, max_steps=300)
     filename = "test_log_" + mode + "_" + suffix + ".csv"
     df.to_csv(filename)
     print(f"Results for {mode} saved to {filename}")

@@ -142,7 +142,7 @@ class MFRLEnv(gym.Env):
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
-                    reward = 1
+                    reward = -1*ENERGY_COEFF
                     self.age = 0
                     break
                 else:
@@ -155,7 +155,8 @@ class MFRLEnv(gym.Env):
         info = {}
         if self.counter == MAX_STEPS:
             terminated = True
-            reward -= MAX_STEPS*np.max(self.max_aoi_set)
+            reward += (1-self.max_aoi)*MAX_STEPS
+            # reward -= MAX_STEPS*np.max(self.max_aoi_set)
         return observation, reward, terminated, False, info
     
 def save_model(model, path='default.pth'):
@@ -164,9 +165,9 @@ def save_model(model, path='default.pth'):
 
 # Hyperparameters
 MAX_STEPS = 300
-MAX_EPISODES = 100
+MAX_EPISODES = 200
 GAMMA = 0.98
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
