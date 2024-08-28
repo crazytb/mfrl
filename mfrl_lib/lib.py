@@ -179,9 +179,9 @@ MAX_GRAD_NORM = 0.5
     
 # Make topology
 node_n = 8
-method = "dumbbell"
-topology = Topology(node_n, method)
-
+method = "linear"
+topology = Topology(n=node_n, model=method, density=1)
+topo_string = f"{method}_{node_n}"
 
 # DataFrame to store rewards
 reward_data = []

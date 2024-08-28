@@ -134,7 +134,7 @@ if __name__ == "__main__":
     output_path = 'outputs'
     if not os.path.exists(output_path):
         os.makedirs(output_path)
-    writer = SummaryWriter(output_path + "/" + "updated_reinforce" + "_" + timestamp)
+    writer = SummaryWriter(output_path + "/" + "reinforce" + "_" + topo_string + "_" + timestamp)
 
     # Make agents
     agents = [Agent(topology, i) for i in range(node_n)]
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     reward_df = pd.DataFrame(reward_data)
     df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
     df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-    df_pivot.to_csv(f'updated_reinforce_{timestamp}.csv', index=False)
+    df_pivot.to_csv(f'reinforce_{topo_string}_{timestamp}.csv', index=False)
     writer.close()
 
     # Save models
@@ -192,4 +192,4 @@ if __name__ == "__main__":
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     for i, agent in enumerate(agents):
-        save_model(agent.pinet, f'{model_path}/updated_reinforce_agent_{i}_{timestamp}.pth')
+        save_model(agent.pinet, f'{model_path}/reinforce_{topo_string}_agent_{i}_{timestamp}.pth')
