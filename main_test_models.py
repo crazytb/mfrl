@@ -78,18 +78,18 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Load the trained models
     for i in range(topology.n):
         if simmode == "RA2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_20240827_173959.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_20240828_025316.pth", map_location=device))
         elif simmode == "RA2C_fed":
-            model_pattern = f"models/RA2C_{topo_string}_agent_*_20240827_173959.pth"
-            output_file = f"models/RA2C_fed_20240827_173959.pth"
+            model_pattern = f"models/RA2C_{topo_string}_agent_*_20240828_025316.pth"
+            output_file = f"models/RA2C_fed_{topo_string}_20240828_025316.pth"
             fuse_ra2c_models(model_pattern, output_file, device)
             agents[i].pinet.load_state_dict(torch.load(output_file, map_location=device))
         elif simmode == "A2C":
-            agents[i].pinet.load_state_dict(torch.load(f"models/A2C_{topo_string}_agent_{i}_20240827_174000.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/A2C_{topo_string}_agent_{i}_20240828_025316.pth", map_location=device))
         # elif simmode == "recurrent":
         #     agents[i].pinet.load_state_dict(torch.load(f"models/reinforce_{topo_string}_DRQN_agent_{i}__.pth", map_location=device))
         elif simmode == "vanilla" or simmode == "fixedprob":
-            agents[i].pinet.load_state_dict(torch.load(f"models/reinforce_{topo_string}_agent_{i}_20240827_174002.pth", map_location=device))
+            agents[i].pinet.load_state_dict(torch.load(f"models/reinforce_{topo_string}_agent_{i}_20240828_025318.pth", map_location=device))
     
     total_reward = 0
     df = pd.DataFrame()
