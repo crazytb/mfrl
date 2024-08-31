@@ -163,6 +163,94 @@ def save_model(model, path='default.pth'):
         torch.save(model.state_dict(), path)
 
 
+class MFRLFullEnv(MFRLEnv):
+    def __init__(self, agent):
+        super().__init__(agent)
+        self.id = agent.id
+        self.all_num = agent.topology.n
+        self.adj_num = agent.get_adjacent_num()
+        self.adj_ids = agent.get_adjacent_ids()
+        self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
+        self.counter = 0
+        self.age = 0
+        self.max_aoi = 0
+        self.all_actions = np.zeros(self.all_num)
+        self.topology = agent.topology
+
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 4))
+        self.action_space = spaces.Discrete(2)
+        
+    def reset(self, seed=None):
+        super().reset(seed=seed)
+        self.counter = 0
+        self.age = 0
+        self.max_aoi = 0
+        observation = np.array([[0.5, 0.5, self.age, self.counter/MAX_STEPS]])
+        info = {}
+        self.all_actions = np.zeros(self.all_num)
+        return observation, info
+    
+    def set_all_actions(self, actions):
+        self.all_actions = np.array(actions)
+        
+    def get_maxaoi(self):
+        return self.max_aoi
+    
+    def set_max_aoi(self, max_aoi):
+        self.max_aoi_set = max_aoi
+        
+    def calculate_meanfield(self):  
+        if self.idle_check():
+            return np.array([[1.0, 0.0]])
+        else:
+            return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
+
+    def idle_check(self):
+        if all(self.all_actions[self.adj_ids] == 0):
+            return True
+        else:
+            return False
+        
+    def get_adjacent_nodes(self, *args):
+        if len(args) > 0:
+            return np.where(self.topology.adjacency_matrix[args[0]] == 1)[0]
+        else:
+            return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
+    
+    def step(self, action):
+        self.counter += 1
+        self.age += 1/MAX_STEPS
+        observation = self.calculate_meanfield()
+        observation = np.append(observation, [self.age, self.counter/MAX_STEPS])
+        observation = np.array([observation])
+        if action == 1:
+            adjacent_nodes = self.get_adjacent_nodes()
+            for j in adjacent_nodes:
+                js_adjacent_nodes = self.get_adjacent_nodes(j)
+                js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
+                if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
+                    and self.all_actions[j] == 0):
+                    reward = -1*ENERGY_COEFF
+                    self.age = 0
+                    break
+                else:
+                    reward = -1*ENERGY_COEFF
+        else:
+            reward = 0
+        # Save maximum AoI value during the episode
+        self.max_aoi = max(self.age, self.max_aoi)
+        terminated = False
+        info = {}
+        if self.counter == MAX_STEPS:
+            terminated = True
+            reward += (1-self.max_aoi)*MAX_STEPS
+            # reward -= MAX_STEPS*np.max(self.max_aoi_set)
+        return observation, reward, terminated, False, info
+    
+def save_model(model, path='default.pth'):
+        torch.save(model.state_dict(), path)
+
+
 # Hyperparameters
 MAX_STEPS = 300
 MAX_EPISODES = 200
