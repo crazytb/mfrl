@@ -163,31 +163,22 @@ def save_model(model, path='default.pth'):
         torch.save(model.state_dict(), path)
 
 
-class MFRLFullEnv(MFRLEnv):
+class MFRLFullEnv(gym.Env):
     def __init__(self, agent):
-        super().__init__(agent)
-        self.id = agent.id
-        self.all_num = agent.topology.n
-        self.adj_num = agent.get_adjacent_num()
-        self.adj_ids = agent.get_adjacent_ids()
-        self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
-        self.counter = 0
-        self.age = 0
-        self.max_aoi = 0
-        self.all_actions = np.zeros(self.all_num)
+        self.n = agent.topology.n
         self.topology = agent.topology
-
-        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 4))
-        self.action_space = spaces.Discrete(2)
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1, self.n+2))
+        self.action_space = spaces.Discrete(2**self.n)
         
     def reset(self, seed=None):
         super().reset(seed=seed)
         self.counter = 0
-        self.age = 0
-        self.max_aoi = 0
-        observation = np.array([[0.5, 0.5, self.age, self.counter/MAX_STEPS]])
+        self.age = np.zeros(self.n)
+        self.max_aoi = np.zeros(self.n)
+        observation = np.concatenate((np.array([0.5]*self.n), self.age, np.array([self.counter/MAX_STEPS])))
+        observation = np.array([observation])
         info = {}
-        self.all_actions = np.zeros(self.all_num)
+        self.all_actions = np.zeros(self.n)
         return observation, info
     
     def set_all_actions(self, actions):
@@ -199,12 +190,6 @@ class MFRLFullEnv(MFRLEnv):
     def set_max_aoi(self, max_aoi):
         self.max_aoi_set = max_aoi
         
-    def calculate_meanfield(self):  
-        if self.idle_check():
-            return np.array([[1.0, 0.0]])
-        else:
-            return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
-
     def idle_check(self):
         if all(self.all_actions[self.adj_ids] == 0):
             return True
@@ -216,37 +201,50 @@ class MFRLFullEnv(MFRLEnv):
             return np.where(self.topology.adjacency_matrix[args[0]] == 1)[0]
         else:
             return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
-    
+        
     def step(self, action):
         self.counter += 1
         self.age += 1/MAX_STEPS
-        observation = self.calculate_meanfield()
-        observation = np.append(observation, [self.age, self.counter/MAX_STEPS])
-        observation = np.array([observation])
-        if action == 1:
-            adjacent_nodes = self.get_adjacent_nodes()
-            for j in adjacent_nodes:
-                js_adjacent_nodes = self.get_adjacent_nodes(j)
-                js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
-                if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
-                    and self.all_actions[j] == 0):
-                    reward = -1*ENERGY_COEFF
-                    self.age = 0
-                    break
-                else:
-                    reward = -1*ENERGY_COEFF
-        else:
-            reward = 0
+        action_arr = decimal_to_binary_array(action, self.n)
+        reward = 0
+        for ind, action in enumerate(action_arr):
+            if action == 1:
+                adjacent_nodes = self.get_adjacent_nodes(ind)
+                for j in adjacent_nodes:
+                    js_adjacent_nodes = self.get_adjacent_nodes(j)
+                    js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != ind]
+                    if (np.all(action_arr[js_adjacent_nodes_except_ind] == 0)
+                        and action_arr[j] == 0):
+                        self.age[ind] = 0
+                        break
+                    else:
+                        pass
+                reward += -1*ENERGY_COEFF
+            else:
+                pass
         # Save maximum AoI value during the episode
-        self.max_aoi = max(self.age, self.max_aoi)
+        self.max_aoi = np.maximum(self.age, self.max_aoi)
         terminated = False
         info = {}
         if self.counter == MAX_STEPS:
             terminated = True
-            reward += (1-self.max_aoi)*MAX_STEPS
-            # reward -= MAX_STEPS*np.max(self.max_aoi_set)
+            reward += sum((1-self.max_aoi)*MAX_STEPS)
+            
+        observation = np.concatenate((action_arr, self.age, np.array([self.counter/MAX_STEPS])))
+        observation = np.array([observation])
+        reward = reward/self.n
         return observation, reward, terminated, False, info
     
+def decimal_to_binary_array(decimal, n):
+    # Convert decimal to binary string, remove '0b' prefix
+    binary_str = bin(decimal[0])[2:]
+    # Pad with zeros if necessary
+    binary_str = binary_str.zfill(n)
+    # Convert to numpy array of integers
+    binary_array = np.array([int(x) for x in binary_str])
+    # Ensure the array has length n by truncating if necessary
+    return binary_array[-n:]
+
 def save_model(model, path='default.pth'):
         torch.save(model.state_dict(), path)
 
@@ -269,7 +267,7 @@ MAX_GRAD_NORM = 0.5
 node_n = 8
 method = "dumbbell"
 topology = Topology(n=node_n, model=method, density=1)
-topo_string = f"{method}_{node_n}_revisedrewardtest"
+topo_string = f"{method}_{node_n}"
 
 # DataFrame to store rewards
 reward_data = []
