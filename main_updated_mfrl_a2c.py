@@ -154,7 +154,7 @@ class Agent:
 
 if __name__ == "__main__":
     # Summarywriter setting
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = FIXED_TIMESTAMP
     output_path = 'outputs'
     if not os.path.exists(output_path):
         os.makedirs(output_path)

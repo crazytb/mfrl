@@ -7,6 +7,8 @@ import gymnasium as gym
 from gymnasium import spaces
 import networkx as nx
 import matplotlib.pyplot as plt
+import os
+from datetime import datetime
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -265,9 +267,23 @@ MAX_GRAD_NORM = 0.5
     
 # Make topology
 node_n = 8
-method = "dumbbell"
+method = "random"
 topology = Topology(n=node_n, model=method, density=1)
 topo_string = f"{method}_{node_n}"
+
+# Make timestamp
+def get_fixed_timestamp():
+    timestamp_file = 'fixed_timestamp.txt'
+    if os.path.exists(timestamp_file):
+        with open(timestamp_file, 'r') as f:
+            return f.read().strip()
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        with open(timestamp_file, 'w') as f:
+            f.write(timestamp)
+        return timestamp
+
+FIXED_TIMESTAMP = get_fixed_timestamp()
 
 # DataFrame to store rewards
 reward_data = []
