@@ -2,11 +2,11 @@
 # import main_mfrl_REINFORCE_recurrent as Recurrent
 # import main_mfrl_REINFORCE_RA2C as RA2C
 # import main_mfrl_REINFORCE_A2C as A2C
-import main_updated_mfrl_ra2c as RA2C
-import main_updated_mfrl_ra2cfull as RA2Cfull
-import main_updated_mfrl_a2c as A2C
-import main_updated_mfrl_reinforce as Reinforce
-import main_updated_mfrl_reinforcefull as Reinforcefull
+import main_mfrl_ra2c as RA2C
+import main_mfrl_ra2cfull as RA2Cfull
+import main_mfrl_a2c as A2C
+import main_mfrl_reinforce as Reinforce
+import main_mfrl_reinforcefull as Reinforcefull
 
 
 from mfrl_lib.lib import *
@@ -72,7 +72,7 @@ topology.show_adjacency_matrix()
 
 def test_model(simmode=None, max_episodes=20, max_steps=300):
     # Create the agents
-    if simmode == "RA2C" or simmode == "RA2C_fed":
+    if simmode == "RA2C" or simmode == "RA2Cfed":
         agents = [RA2C.Agent(topology, i) for i in range(node_n)]
     elif simmode == "RA2Cfull":
         agent = RA2Cfull.Agent(topology, n_obs=2*node_n+1, n_act=2**node_n)
@@ -81,34 +81,37 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     elif simmode == "reinforce" or simmode == "fixedprob":
         agents = [Reinforce.Agent(topology, i) for i in range(node_n)]
     elif simmode == "reinforcefull":
-        agents = Reinforcefull.Agent(topology, n_obs=2*node_n+1, n_act=2**node_n)
+        agent = Reinforcefull.Agent(topology, n_obs=2*node_n+1, n_act=2**node_n)
     else:
         raise ValueError("Invalid simmode.")
     
     # Load the trained models
-    for i in range(topology.n):
-        if simmode == "RA2C":
+    if simmode == "RA2C":
+        for i in range(topology.n):
             agents[i].pinet.load_state_dict(torch.load(f"models/RA2C_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
-        elif simmode == "RA2Cfull":
-            agent.pinet.load_state_dict(torch.load(f"models/RA2Cfull_{topo_string}_{timestamp}.pth", map_location=device))
-        elif simmode == "RA2C_fed":
-            model_pattern = f"models/RA2C_{topo_string}_agent_*_{timestamp}.pth"
-            output_file = f"models/RA2C_fed_{topo_string}_{timestamp}.pth"
-            fuse_ra2c_models(model_pattern, output_file, device)
+    elif simmode == "RA2Cfull":
+        agent.pinet.load_state_dict(torch.load(f"models/RA2Cfull_{topo_string}_{timestamp}.pth", map_location=device))
+    elif simmode == "RA2Cfed":
+        model_pattern = f"models/RA2C_{topo_string}_agent_*_{timestamp}.pth"
+        output_file = f"models/RA2Cfed_{topo_string}_{timestamp}.pth"
+        fuse_ra2c_models(model_pattern, output_file, device)
+        for i in range(topology.n):
             agents[i].pinet.load_state_dict(torch.load(output_file, map_location=device))
-        elif simmode == "A2C":
+    elif simmode == "A2C":
+        for i in range(topology.n):
             agents[i].pinet.load_state_dict(torch.load(f"models/A2C_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
-        elif simmode == "reinforce" or simmode == "fixedprob":
+    elif simmode == "reinforce" or simmode == "fixedprob":
+        for i in range(topology.n):
             agents[i].pinet.load_state_dict(torch.load(f"models/reinforce_{topo_string}_agent_{i}_{timestamp}.pth", map_location=device))
-        elif simmode == "reinforcefull":
-            agent.pinet.load_state_dict(torch.load(f"models/reinforcefull_{topo_string}_{timestamp}.pth", map_location=device))
+    elif simmode == "reinforcefull":
+        agent.pinet.load_state_dict(torch.load(f"models/reinforcefull_{topo_string}_{timestamp}.pth", map_location=device))
         
     
     total_reward = 0
     df = pd.DataFrame()
     for n_epi in tqdm(range(max_episodes)):
         if simmode == "RA2Cfull" or simmode == "reinforcefull":
-            states = [torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device)]
+            states = torch.from_numpy(agent.env.reset()[0].astype('float32')).unsqueeze(0).to(device)
             probs = None
             reward_per_epi = 0
             h = torch.zeros(1, 1, 32).to(device)
@@ -128,9 +131,9 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
             if simmode == "RA2Cfull" or simmode == "reinforcefull":
                 with torch.no_grad():
                     if simmode == "RA2Cfull":
-                        prob, h, c, _, _, _ = agent.pinet.sample_action(states[0], h, c)
+                        prob, h, c, _, _, _ = agent.pinet.sample_action(states, h, c)
                     elif simmode == "reinforcefull":
-                        prob = agent.pinet.sample_action(states[0])
+                        prob = agent.pinet.sample_action(states)
                     m = Categorical(prob)
                     action = m.sample().item()
                     actions.append(action)
@@ -149,7 +152,7 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
             else:
                 for i in range(node_n):
                     with torch.no_grad():
-                        if simmode == "RA2C" or simmode == "RA2C_fed":
+                        if simmode == "RA2C" or simmode == "RA2Cfed":
                             probs[i], h[i], c[i], _, _, _ = agents[i].pinet.sample_action(states[i], h[i], c[i])
                         elif simmode == "A2C":
                             probs[i], _, _, _ = agents[i].pinet.sample_action(states[i])
@@ -183,9 +186,10 @@ def test_model(simmode=None, max_episodes=20, max_steps=300):
     return df, average_reward
 
 timestamp = FIXED_TIMESTAMP
-for mode in ["RA2C", "RA2C_fed", "RA2Cfull", "A2C", "recurrent", "reinforce", "fixedprob"]:
+for mode in ["RA2C", "RA2Cfed", "RA2Cfull", "A2C", "reinforce", "reinforcefull", "fixedprob"]:
 # for mode in ["RA2C", "RA2Cfull"]:
-    df, avg_reward = test_model(simmode=mode, max_episodes=1, max_steps=300)
+    print(f"Testing model for {mode}...")
+    df, avg_reward = test_model(simmode=mode, max_episodes=20, max_steps=300)
     filename = f"test_log_{mode}_{topo_string}_{timestamp}.csv"
     df.to_csv(filename)
     print(f"Results for {mode} saved to {filename}")

@@ -144,11 +144,11 @@ class MFRLEnv(gym.Env):
                 js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != self.id]
                 if (np.all(self.all_actions[js_adjacent_nodes_except_ind] == 0)
                     and self.all_actions[j] == 0):
-                    reward = -1*ENERGY_COEFF
                     self.age = 0
                     break
                 else:
-                    reward = -1*ENERGY_COEFF
+                    pass
+                reward = -1*ENERGY_COEFF
         else:
             reward = 0
         # Save maximum AoI value during the episode
@@ -259,7 +259,7 @@ LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
-ENERGY_COEFF = 1
+ENERGY_COEFF = 0.1
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
@@ -267,7 +267,7 @@ MAX_GRAD_NORM = 0.5
     
 # Make topology
 node_n = 8
-method = "random"
+method = "linear"
 topology = Topology(n=node_n, model=method, density=1)
 topo_string = f"{method}_{node_n}"
 
