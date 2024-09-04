@@ -148,7 +148,7 @@ class MFRLEnv(gym.Env):
                     break
                 else:
                     pass
-                reward = -1*ENERGY_COEFF
+            reward = -1*ENERGY_COEFF
         else:
             reward = 0
         # Save maximum AoI value during the episode
@@ -266,7 +266,7 @@ MAX_GRAD_NORM = 0.5
 
     
 # Make topology
-node_n = 8
+node_n = 10
 method = "linear"
 topology = Topology(n=node_n, model=method, density=1)
 topo_string = f"{method}_{node_n}"

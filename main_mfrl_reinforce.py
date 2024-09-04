@@ -37,7 +37,6 @@ class Pinet(nn.Module):
         self.fc1 = nn.Linear(n_observations, self.hidden_space)
         self.fc2 = nn.Linear(self.hidden_space, self.hidden_space)
         self.fc3 = nn.Linear(self.hidden_space, n_actions)
-        
         self.init_weights()
         
     def init_weights(self):
