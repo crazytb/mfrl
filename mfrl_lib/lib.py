@@ -259,15 +259,15 @@ LEARNING_RATE = 0.0001
 N_OBSERVATIONS = 4
 N_ACTIONS = 2
 print_interval = 10
-ENERGY_COEFF = 0.1
+ENERGY_COEFF = 1
 ENTROPY_COEFF = 0.01
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
 
     
 # Make topology
-node_n = 10
-method = "linear"
+node_n = 8
+method = "random"
 topology = Topology(n=node_n, model=method, density=1)
 topo_string = f"{method}_{node_n}"
 
