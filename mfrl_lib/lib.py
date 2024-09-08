@@ -267,7 +267,7 @@ MAX_GRAD_NORM = 0.5
     
 # Make topology
 node_n = 8
-method = "linear"
+method = "random"
 topology = Topology(n=node_n, model=method, density=1)
 topo_string = f"{method}_{node_n}"
 
