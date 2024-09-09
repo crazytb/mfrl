@@ -97,9 +97,11 @@ class Topology():
 class MFRLEnv(gym.Env):
     def __init__(self, agent):
         super().__init__()
+        self.agent = agent
+        
         self.id = agent.id
         self.all_num = agent.topology.n
-        self.adj_num = agent.get_adjacent_num()
+        # self.adj_num = agent.get_adjacent_num()
         self.adj_ids = agent.get_adjacent_ids()
         self.adj_obs = {adj_id: [0, 0] for adj_id in self.adj_ids}
         self.counter = 0
@@ -134,7 +136,9 @@ class MFRLEnv(gym.Env):
         if self.idle_check():
             return np.array([[1.0, 0.0]])
         else:
-            return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
+            adj_num = self.agent.get_adjacent_num()
+            return np.array([adj_num*(2**adj_num)*np.array([0.5, 0.5]) - adj_num*np.array([1.0, 0.0])])/(adj_num*(2**adj_num)-adj_num)
+            # return np.array([self.adj_num*(2**self.adj_num)*np.array([0.5, 0.5]) - self.adj_num*np.array([1.0, 0.0])])/(self.adj_num*(2**self.adj_num)-self.adj_num)
 
     def idle_check(self):
         if all(self.all_actions[self.adj_ids] == 0):
@@ -185,7 +189,7 @@ def save_model(model, path='default.pth'):
 class MFRLFullEnv(gym.Env):
     def __init__(self, agent):
         super().__init__()
-        self.seed(GLOBAL_SEED)
+        # self.seed(GLOBAL_SEED)
         self.n = agent.topology.n
         self.topology = agent.topology
         self.observation_space = spaces.Box(low=0, high=1, shape=(1, self.n+2))

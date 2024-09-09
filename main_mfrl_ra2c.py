@@ -85,13 +85,21 @@ class Agent:
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
         self.data = []
-        self.estimated_adj_nodes = np.array([])
+        self.estimated_adj_nodes = []
         
+    def append_adj_id(self, lst, item):
+        if item not in lst:
+            lst.append(item)
+        return lst
+    
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
     
     def get_adjacent_num(self):
-        return len(self.get_adjacent_ids())
+        if len(self.estimated_adj_nodes) == 0:
+            return 1
+        else:
+            return len(self.estimated_adj_nodes)
     
     def put_data(self, item):
         self.data.append(item)
@@ -177,9 +185,15 @@ if __name__ == "__main__":
                 actions.append(a)
                 reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
             
-            for agent in enumerate(agents):
+            for agent_id, agent in enumerate(agents):
                 agent.env.set_all_actions(actions)
                 max_aoi.append(agent.env.get_maxaoi())
+                if actions[agent_id] == 0:
+                    transmitting_node = agent.topology.adjacency_matrix[agent_id] * actions
+                    if sum(transmitting_node) == 1:
+                        # Find the corresponding node id
+                        transmitting_node_id = np.where(transmitting_node == 1)[0][0]
+                        agent.append_adj_id(agent.estimated_adj_nodes, transmitting_node_id)
                             
             for agent_id, agent in enumerate(agents):
                 agent.env.set_max_aoi(max_aoi)
