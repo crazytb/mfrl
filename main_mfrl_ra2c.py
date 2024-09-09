@@ -85,6 +85,7 @@ class Agent:
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
         self.data = []
+        self.estimated_adj_nodes = np.array([])
         
     def get_adjacent_ids(self):
         return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
@@ -157,7 +158,7 @@ if __name__ == "__main__":
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
-        observation = [agent.env.reset()[0] for agent in agents]
+        observation = [agent.env.reset(seed=GLOBAL_SEED)[0] for agent in agents]
         h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
         c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
         done = [False] * node_n
@@ -176,10 +177,10 @@ if __name__ == "__main__":
                 actions.append(a)
                 reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
             
-            for agent in agents:
+            for agent in enumerate(agents):
                 agent.env.set_all_actions(actions)
                 max_aoi.append(agent.env.get_maxaoi())
-            
+                            
             for agent_id, agent in enumerate(agents):
                 agent.env.set_max_aoi(max_aoi)
                 next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])

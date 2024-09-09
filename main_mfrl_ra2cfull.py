@@ -159,7 +159,7 @@ if __name__ == "__main__":
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
-        observation = agent.env.reset()[0]
+        observation = agent.env.reset(seed=GLOBAL_SEED)[0]
         h = torch.zeros(1, 1, 32).to(device)
         c = torch.zeros(1, 1, 32).to(device)
         done = False

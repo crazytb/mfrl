@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
-        observation = [agent.env.reset()[0] for agent in agents]
+        observation = [agent.env.reset(seed=GLOBAL_SEED)[0] for agent in agents]
         done = [False] * node_n
         
         for t in tqdm(range(MAX_STEPS), desc="  Steps", position=1, leave=False):

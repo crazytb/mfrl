@@ -9,6 +9,22 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import os
 from datetime import datetime
+import random
+
+# Add this function to set global seed
+def set_global_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# Set a global seed
+GLOBAL_SEED = 42
+set_global_seed(GLOBAL_SEED)
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -80,6 +96,7 @@ class Topology():
 
 class MFRLEnv(gym.Env):
     def __init__(self, agent):
+        super().__init__()
         self.id = agent.id
         self.all_num = agent.topology.n
         self.adj_num = agent.get_adjacent_num()
@@ -167,6 +184,8 @@ def save_model(model, path='default.pth'):
 
 class MFRLFullEnv(gym.Env):
     def __init__(self, agent):
+        super().__init__()
+        self.seed(GLOBAL_SEED)
         self.n = agent.topology.n
         self.topology = agent.topology
         self.observation_space = spaces.Box(low=0, high=1, shape=(1, self.n+2))
@@ -267,7 +286,7 @@ MAX_GRAD_NORM = 0.5
     
 # Make topology
 node_n = 8
-method = "random"
+method = "dumbbell"
 topology = Topology(n=node_n, model=method, density=1)
 topo_string = f"{method}_{node_n}"
 
@@ -287,3 +306,4 @@ FIXED_TIMESTAMP = get_fixed_timestamp()
 
 # DataFrame to store rewards
 reward_data = []
+
