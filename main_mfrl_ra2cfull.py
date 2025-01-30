@@ -148,8 +148,8 @@ if __name__ == "__main__":
     writer = SummaryWriter(output_path + "/" + "RA2Cfull" + "_" + topo_string + "_" + timestamp)
 
     # Parameter overwriting
-    n_obs = 2*node_n + 1
-    n_act = 2**node_n
+    n_obs = 2*node_n+1
+    n_act = N_ACTIONS**node_n
     # MAX_EPISODES = 10
     
     # Make agents

@@ -192,7 +192,7 @@ class MFRLFullEnv(gym.Env):
         # self.seed(GLOBAL_SEED)
         self.n = agent.topology.n
         self.topology = agent.topology
-        self.observation_space = spaces.Box(low=0, high=1, shape=(1, self.n+2))
+        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 2*self.n+1))
         self.action_space = spaces.Discrete(2**self.n)
         
     def reset(self, seed=None):
