@@ -136,7 +136,13 @@ class Agent:
             s_prime_lst.append(s_prime)
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
-            
+        
+        s_lst = np.array(s_lst)
+        a_lst = np.array(a_lst)
+        r_lst = np.array(r_lst)
+        s_prime_lst = np.array(s_prime_lst)
+        done_lst = np.array(done_lst)
+        
         s = torch.tensor(s_lst, dtype=torch.float).to(device)
         a = torch.tensor(a_lst).to(device)
         r = torch.tensor(r_lst).to(device)
@@ -166,6 +172,7 @@ if __name__ == "__main__":
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
+        accu_reward = 0.0
         observation = [agent.env.reset(seed=GLOBAL_SEED)[0] for agent in agents]
         h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
         c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
@@ -183,7 +190,7 @@ if __name__ == "__main__":
                 m = Categorical(prob)
                 a = m.sample().item()
                 actions.append(a)
-                reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
+                # reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
             
             for agent_id, agent in enumerate(agents):
                 agent.env.set_all_actions(actions)
@@ -201,6 +208,7 @@ if __name__ == "__main__":
                 observation[agent_id] = next_observation
                 episode_utility += reward
                 agent.put_data((observation[agent_id], actions[agent_id], reward, next_observation, done[agent_id]))
+            reward_data.append({'episode': n_epi, 'step': t, 'reward': episode_utility, 'action': np.array(actions), 'age': get_env_ages(agents)})
                 
             if all(done):
                 break
@@ -215,10 +223,17 @@ if __name__ == "__main__":
 
     # Save rewards to DataFrame and CSV
     reward_df = pd.DataFrame(reward_data)
-    df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
-    df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-    df_pivot.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
-    writer.close()
+    action_cols = reward_df['action'].apply(pd.Series)
+    action_cols.columns = [f'action_{i}' for i in range(node_n)]
+    age_cols = reward_df['age'].apply(pd.Series)
+    age_cols.columns = [f'age_{i}' for i in range(node_n)]
+    result_df = pd.concat([reward_df.drop(['action', 'age'], axis=1), action_cols, age_cols], axis=1)
+    result_df.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
+    # reward_df = pd.DataFrame(reward_data)
+    # df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
+    # df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
+    # df_pivot.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
+    # writer.close()
 
     # Save models
     model_path = 'models'

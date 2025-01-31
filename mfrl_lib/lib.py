@@ -182,6 +182,12 @@ class MFRLEnv(gym.Env):
             # reward -= MAX_STEPS*np.max(self.max_aoi_set)
         return observation, reward, terminated, False, info
     
+def get_env_ages(agents):
+    """
+    Get all environment ages as a numpy array.
+    """
+    return np.array([agent.env.age for agent in agents])
+
 def save_model(model, path='default.pth'):
         torch.save(model.state_dict(), path)
 

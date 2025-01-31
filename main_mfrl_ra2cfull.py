@@ -127,6 +127,12 @@ class Agent:
             s_prime_lst.append(s_prime)
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
+        
+        s_lst = np.array(s_lst)
+        a_lst = np.array(a_lst)
+        r_lst = np.array(r_lst)
+        s_prime_lst = np.array(s_prime_lst)
+        done_lst = np.array(done_lst)
             
         s = torch.tensor(s_lst, dtype=torch.float).to(device)
         a = torch.tensor(a_lst).to(device)
@@ -179,6 +185,7 @@ if __name__ == "__main__":
             observation = next_observation
             episode_utility += reward
             reward_data.append({'episode': n_epi, 'step': t, 'reward': reward, 'action': decimal_to_binary_array([a], node_n), 'age': curr_age})
+            # agent.put_data((observation, decimal_to_binary_array([a], node_n), reward, next_observation, done))
             agent.put_data((observation, actions, reward, next_observation, done))
                 
             if done:
