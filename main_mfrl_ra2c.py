@@ -29,7 +29,6 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
-
 class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
@@ -72,15 +71,17 @@ class Pinet(nn.Module):
         prob, (h_new, c_new) = self.pi(obs, (h, c))
         m = Categorical(prob)
         action = m.sample()
-        return prob, h_new, c_new, m.log_prob(action), m.entropy(), self.v(obs, (h, c))
+        return prob, action, h_new, c_new, m.log_prob(action), m.entropy(), self.v(obs, (h, c))
 
 class Agent:
-    def __init__(self, topology, id):
+    def __init__(self, topology, id, arrival_rate):
         self.gamma = GAMMA
         self.topology = topology
         if id >= topology.n:
             raise ValueError("id must be less than n.")
         self.id = id
+        self.arrival_rate = arrival_rate
+        
         self.env = MFRLEnv(self)
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
@@ -166,13 +167,15 @@ if __name__ == "__main__":
     # MAX_EPISODES = 10
 
     # Make agents
-    agents = [Agent(topology, i) for i in range(node_n)]
+    agents = [Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
+    for agent in agents:
+        agent.env.set_all_arrival_rates(arrival_rate)
 
     reward_data = []
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
-        accu_reward = 0.0
+        instant_sum = 0.0
         observation = [agent.env.reset(seed=GLOBAL_SEED)[0] for agent in agents]
         h = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
         c = [torch.zeros(1, 1, 32).to(device) for _ in range(node_n)]
@@ -182,18 +185,16 @@ if __name__ == "__main__":
             actions = []
             max_aoi = []
             for agent_id, agent in enumerate(agents):
-                prob, h[agent_id], c[agent_id], log_prob, entropy, value = agent.pinet.sample_action(
+                prob, a, h[agent_id], c[agent_id], log_prob, entropy, value = agent.pinet.sample_action(
                     torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device), 
                     h[agent_id], 
                     c[agent_id]
                 )
-                m = Categorical(prob)
-                a = m.sample().item()
-                actions.append(a)
+                actions.append(a.item())
                 # reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
-            
+            real_actions = actions * (arrival_rate > np.random.rand(node_n))
             for agent_id, agent in enumerate(agents):
-                agent.env.set_all_actions(actions)
+                agent.env.set_all_actions(real_actions)
                 max_aoi.append(agent.env.get_maxaoi())
                 if actions[agent_id] == 0:
                     transmitting_node = agent.topology.adjacency_matrix[agent_id] * actions
@@ -201,14 +202,25 @@ if __name__ == "__main__":
                         # Find the corresponding node id
                         transmitting_node_id = np.where(transmitting_node == 1)[0][0]
                         agent.append_adj_id(agent.estimated_adj_nodes, transmitting_node_id)
-                            
+
             for agent_id, agent in enumerate(agents):
                 agent.env.set_max_aoi(max_aoi)
-                next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
+                # next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
+                next_observation, reward, done[agent_id], _, _ = agent.env.step(agent.env.all_actions[agent_id])
                 observation[agent_id] = next_observation
                 episode_utility += reward
+                instant_sum += reward
                 agent.put_data((observation[agent_id], actions[agent_id], reward, next_observation, done[agent_id]))
-            reward_data.append({'episode': n_epi, 'step': t, 'reward': episode_utility, 'action': np.array(actions), 'age': get_env_ages(agents)})
+                
+            reward_data.append({
+                'episode': n_epi,
+                'step': t,
+                'reward': instant_sum,
+                'action': np.array(actions),
+                'age': get_env_ages(agents)
+                })
+            instant_sum = 0.0
+            
                 
             if all(done):
                 break

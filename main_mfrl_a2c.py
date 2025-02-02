@@ -29,7 +29,6 @@ elif torch.backends.mps.is_available():
 else:
     device = torch.device("cpu")
 
-
 class Pinet(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Pinet, self).__init__()
@@ -63,15 +62,17 @@ class Pinet(nn.Module):
         prob = self.pi(obs)
         m = Categorical(prob)
         action = m.sample()
-        return prob, m.log_prob(action), m.entropy(), self.v(obs)
+        return prob, action, m.log_prob(action), m.entropy(), self.v(obs)
 
 class Agent:
-    def __init__(self, topology, id):
+    def __init__(self, topology, id, arrival_rate):
         self.gamma = GAMMA
         self.topology = topology
         if id >= topology.n:
             raise ValueError("id must be less than n.")
         self.id = id
+        self.arrival_rate = arrival_rate
+        
         self.env = MFRLEnv(self)
         self.pinet = Pinet(N_OBSERVATIONS, N_ACTIONS).to(device)
         self.optimizer = optim.Adam(self.pinet.parameters(), lr=LEARNING_RATE)
@@ -118,7 +119,13 @@ class Agent:
             s_prime_lst.append(s_prime)
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
-            
+        
+        s_lst = np.array(s_lst)
+        a_lst = np.array(a_lst)
+        r_lst = np.array(r_lst)
+        s_prime_lst = np.array(s_prime_lst)
+        done_lst = np.array(done_lst)
+        
         s = torch.tensor(s_lst, dtype=torch.float).to(device)
         a = torch.tensor(a_lst).to(device)
         r = torch.tensor(r_lst).to(device)
@@ -128,29 +135,7 @@ class Agent:
         s = s.view([1, len(self.data), -1])
         s_prime = s_prime.view([1, len(self.data), -1])
         return s, a, r, s_prime, done_mask
-    
-    # def make_batch(self):
-    #     transitions = np.array(self.data, dtype=object)
-    #     s, a, r, s_prime, done = transitions.T
 
-    #     s = np.stack(s)
-    #     s_prime = np.stack(s_prime)
-    #     a = np.array(a)[:, np.newaxis]
-    #     r = np.array(r)[:, np.newaxis]
-    #     done_mask = np.array([0 if d else 1 for d in done])[:, np.newaxis]
-
-    #     s = torch.FloatTensor(s).to(device)
-    #     a = torch.LongTensor(a).to(device)
-    #     r = torch.FloatTensor(r).to(device)
-    #     s_prime = torch.FloatTensor(s_prime).to(device)
-    #     done_mask = torch.FloatTensor(done_mask).to(device)
-
-    #     s = s.view(1, len(self.data), -1)
-    #     s_prime = s_prime.view(1, len(self.data), -1)
-
-    #     self.data = []  # Clear the data after processing
-
-    #     return s, a, r, s_prime, done_mask
 
 if __name__ == "__main__":
     # Summarywriter setting
@@ -161,12 +146,13 @@ if __name__ == "__main__":
     writer = SummaryWriter(output_path + "/" + "A2C" + "_" + topo_string + "_" + timestamp)
 
     # Make agents
-    agents = [Agent(topology, i) for i in range(node_n)]
+    agents = [Agent(topology, i, arrival_rate[i]) for i in range(node_n)]
 
     reward_data = []
 
     for n_epi in tqdm(range(MAX_EPISODES), desc="Episodes", position=0, leave=True):
         episode_utility = 0.0
+        instant_sum = 0.0
         observation = [agent.env.reset(seed=GLOBAL_SEED)[0] for agent in agents]
         done = [False] * node_n
         
@@ -174,24 +160,34 @@ if __name__ == "__main__":
             actions = []
             max_aoi = []
             for agent_id, agent in enumerate(agents):
-                prob, log_prob, entropy, value = agent.pinet.sample_action(
+                prob, a, log_prob, entropy, value = agent.pinet.sample_action(
                     torch.from_numpy(observation[agent_id].astype('float32')).unsqueeze(0).to(device)
                 )
-                m = Categorical(prob)
-                a = m.sample().item()
-                actions.append(a)
-                reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
-            
+                actions.append(a.item())
+                # reward_data.append({'episode': n_epi, 'step': t, 'agent_id': agent_id, 'prob of 1': prob[0, 0, 1].item()})
+            real_actions = actions * (arrival_rate > np.random.rand(node_n))
             for agent in agents:
-                agent.env.set_all_actions(actions)
+                agent.env.set_all_actions(real_actions)
                 max_aoi.append(agent.env.get_maxaoi())
             
             for agent_id, agent in enumerate(agents):
                 agent.env.set_max_aoi(max_aoi)
-                next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
+                # next_observation, reward, done[agent_id], _, _ = agent.env.step(actions[agent_id])
+                next_observation, reward, done[agent_id], _, _ = agent.env.step(agent.env.all_actions[agent_id])
                 observation[agent_id] = next_observation
                 episode_utility += reward
+                instant_sum += reward
                 agent.put_data((observation[agent_id], actions[agent_id], reward, next_observation, done[agent_id]))
+                
+            reward_data.append({
+                'episode': n_epi,
+                'step': t,
+                'reward': instant_sum,
+                'action': np.array(actions),
+                'age': get_env_ages(agents)
+                })
+            instant_sum = 0.0
+            
                 
             if all(done):
                 break
@@ -206,10 +202,17 @@ if __name__ == "__main__":
 
     # Save rewards to DataFrame and CSV
     reward_df = pd.DataFrame(reward_data)
-    df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
-    df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
-    df_pivot.to_csv(f'A2C_{topo_string}_{timestamp}.csv', index=False)
-    writer.close()
+    action_cols = reward_df['action'].apply(pd.Series)
+    action_cols.columns = [f'action_{i}' for i in range(node_n)]
+    age_cols = reward_df['age'].apply(pd.Series)
+    age_cols.columns = [f'age_{i}' for i in range(node_n)]
+    result_df = pd.concat([reward_df.drop(['action', 'age'], axis=1), action_cols, age_cols], axis=1)
+    result_df.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
+    # reward_df = pd.DataFrame(reward_data)
+    # df_pivot = reward_df.pivot_table(index=['episode', 'step'], columns='agent_id', values='prob of 1').reset_index()
+    # df_pivot.columns = ['episode', 'step'] + [f'agent_{col}' for col in df_pivot.columns[2:]]
+    # df_pivot.to_csv(f'RA2C_{topo_string}_{timestamp}.csv', index=False)
+    # writer.close()
 
     # Save models
     model_path = 'models'

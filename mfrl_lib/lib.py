@@ -61,7 +61,7 @@ class Topology():
             for i in range(1, self.n):
                 adjacency_matrix[i-1, i] = 1
                 adjacency_matrix[i, i-1] = 1
-        elif self.model == "random":
+        elif self.model == "random" or self.model == "fullmesh":
             for i in range(1, self.n):
                 adjacency_matrix[i-1, i] = 1
                 adjacency_matrix[i, i-1] = 1
@@ -98,7 +98,7 @@ class MFRLEnv(gym.Env):
     def __init__(self, agent):
         super().__init__()
         self.agent = agent
-        
+        self.arrival_rate = agent.arrival_rate
         self.id = agent.id
         self.all_num = agent.topology.n
         # self.adj_num = agent.get_adjacent_num()
@@ -125,6 +125,9 @@ class MFRLEnv(gym.Env):
     
     def set_all_actions(self, actions):
         self.all_actions = np.array(actions)
+        
+    def set_all_arrival_rates(self, arrival_rate):
+        self.all_arrival_rates = arrival_rate
         
     def get_maxaoi(self):
         return self.max_aoi
@@ -158,7 +161,7 @@ class MFRLEnv(gym.Env):
         observation = self.calculate_meanfield()
         observation = np.append(observation, [self.age, self.counter/MAX_STEPS])
         observation = np.array([observation])
-        if action == 1:
+        if (self.all_actions[self.id] == 1):
             adjacent_nodes = self.get_adjacent_nodes()
             for j in adjacent_nodes:
                 js_adjacent_nodes = self.get_adjacent_nodes(j)
@@ -174,12 +177,12 @@ class MFRLEnv(gym.Env):
             reward = 0
         # Save maximum AoI value during the episode
         self.max_aoi = max(self.age, self.max_aoi)
-        terminated = False
+        # Check termination condition
+        terminated = self.counter == MAX_STEPS
         info = {}
-        if self.counter == MAX_STEPS:
-            terminated = True
+        
+        if terminated:
             reward += (1-self.max_aoi)*MAX_STEPS
-            # reward -= MAX_STEPS*np.max(self.max_aoi_set)
         return observation, reward, terminated, False, info
     
 def get_env_ages(agents):
@@ -195,80 +198,140 @@ def save_model(model, path='default.pth'):
 class MFRLFullEnv(gym.Env):
     def __init__(self, agent):
         super().__init__()
-        # self.seed(GLOBAL_SEED)
         self.n = agent.topology.n
         self.topology = agent.topology
-        self.observation_space = spaces.Box(low=0, high=1, shape=(1, 2*self.n+1))
-        self.action_space = spaces.Discrete(2**self.n)
-        
-    def reset(self, seed=None):
-        super().reset(seed=seed)
+        self.arrival_rate = agent.arrival_rate
         self.counter = 0
         self.age = np.zeros(self.n)
         self.max_aoi = np.zeros(self.n)
-        observation = np.concatenate((np.array([0.5]*self.n), self.age, np.array([self.counter/MAX_STEPS])))
-        observation = np.array([observation])
+        self.states = np.zeros((self.n, 3))  # States for each device: [idle, success, collision]
+        self.states[:, 0] = 1  # Initialize all devices to idle state
+        
+        # Define observation space
+        self.observation_space = spaces.Dict({
+            "devices": spaces.Tuple([
+                spaces.Dict({
+                    "state": spaces.MultiBinary(3),  # One-hot encoded {idle:0, success:1, collision:2}
+                    "age": spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float32)
+                }) for _ in range(self.n)
+            ]),
+            "counter": spaces.Discrete(MAX_STEPS)
+        })
+
+        # Define action space as MultiBinary for direct binary actions
+        self.action_space = spaces.MultiBinary(self.n)
+        
+        # For storing last action and observation (useful for debugging)
+        self.last_action = None
+        self.last_observation = None
+        
+    def reset(self, seed=None, options=None):
+        """Reset the environment to initial state."""
+        super().reset(seed=seed)
+        
+        # Reset counters and states
+        self.counter = 0
+        self.age = np.zeros(self.n)
+        self.max_aoi = np.zeros(self.n)
+        self.states = np.zeros((self.n, 3))
+        self.states[:, 0] = 1  # All devices start in idle state
+        
+        # Create observation
+        observation = self._create_observation()
+        self.last_observation = observation
+        
         info = {}
-        self.all_actions = np.zeros(self.n)
         return observation, info
     
-    def set_all_actions(self, actions):
-        self.all_actions = np.array(actions)
-        
-    def get_maxaoi(self):
-        return self.max_aoi
+    def _create_observation(self):
+        """Helper method to create observation dictionary."""
+        return {
+            "devices": tuple({
+                "state": self.states[i],
+                "age": np.array([self.age[i]], dtype=np.float32)
+            } for i in range(self.n)),
+            "counter": self.counter
+        }
     
-    def set_max_aoi(self, max_aoi):
-        self.max_aoi_set = max_aoi
-        
-    def idle_check(self):
-        if all(self.all_actions[self.adj_ids] == 0):
-            return True
-        else:
-            return False
-        
-    def get_adjacent_nodes(self, *args):
-        if len(args) > 0:
-            return np.where(self.topology.adjacency_matrix[args[0]] == 1)[0]
-        else:
-            return np.where(self.topology.adjacency_matrix[self.id] == 1)[0]
+    def _validate_action(self, action):
+        """Validate the input action."""
+        if not isinstance(action, (np.ndarray, list)):
+            raise ValueError(f"Action must be numpy array or list, got {type(action)}")
+        if len(action) != self.n:
+            raise ValueError(f"Action length must be {self.n}, got {len(action)}")
+        if not np.all(np.logical_or(action == 0, action == 1)):
+            raise ValueError("Actions must be binary (0 or 1)")
+        return np.array(action)
         
     def step(self, action):
+        """Execute one step in the environment."""
+        # Validate and store action
+        action = self._validate_action(action)
+        self.last_action = action
+        
+        # Increment counter and age
         self.counter += 1
-        self.age += 1/MAX_STEPS
-        action_arr = decimal_to_binary_array(action, self.n)
-        reward = 0
-        for ind, action in enumerate(action_arr):
-            if action == 1:
-                adjacent_nodes = self.get_adjacent_nodes(ind)
-                for j in adjacent_nodes:
-                    js_adjacent_nodes = self.get_adjacent_nodes(j)
-                    js_adjacent_nodes_except_ind = js_adjacent_nodes[js_adjacent_nodes != ind]
-                    if (np.all(action_arr[js_adjacent_nodes_except_ind] == 0)
-                        and action_arr[j] == 0):
-                        self.age[ind] = 0
-                        break
-                    else:
-                        pass
-                reward += -1*ENERGY_COEFF
+        self.age += 1 / MAX_STEPS
+        
+        # Track transmitting devices and calculate energy cost
+        transmitting_devices = []
+        for ind, act in enumerate(action):
+            if act == 1 and self.arrival_rate[ind] > np.random.rand():
+                transmitting_devices.append(ind)
+        
+        # Calculate energy cost
+        energy_reward = -1 * len(transmitting_devices) * ENERGY_COEFF
+        
+        # Update states based on transmission outcomes
+        new_states = np.zeros((self.n, 3))
+        for ind in range(self.n):
+            if ind in transmitting_devices:
+                if len(transmitting_devices) == 1:
+                    # Successful transmission
+                    new_states[ind, 1] = 1  # Success state
+                    self.age[ind] = 0  # Reset age
+                else:
+                    # Collision
+                    new_states[ind, 2] = 1  # Collision state
             else:
-                pass
-        # Save maximum AoI value during the episode
+                # Idle
+                new_states[ind, 0] = 1
+        
+        self.states = new_states
         self.max_aoi = np.maximum(self.age, self.max_aoi)
-        terminated = False
-        info = {}
-        if self.counter == MAX_STEPS:
-            terminated = True
-            reward += sum((1-self.max_aoi)*MAX_STEPS)
+        
+        # Create observation
+        observation = self._create_observation()
+        self.last_observation = observation
+        
+        # Check termination
+        terminated = self.counter >= MAX_STEPS
+        
+        # Calculate reward
+        if terminated:
+            # Add AoI reward at episode end
+            aoi_reward = np.sum((1 - self.max_aoi)) * MAX_STEPS
+            total_reward = energy_reward + aoi_reward
+        else:
+            total_reward = energy_reward
             
-        observation = np.concatenate((action_arr, self.age, np.array([self.counter/MAX_STEPS])))
-        observation = np.array([observation])
-        reward = reward/self.n
-        return observation, reward, terminated, False, info
+        return observation, total_reward, terminated, False, {}
+    
+    def get_maxaoi(self):
+        """Return the maximum AoI values."""
+        return self.max_aoi.copy()
+    
+    def render(self):
+        """Optional: Implement visualization of the environment state."""
+        pass
+        
+    def close(self):
+        """Perform any necessary cleanup."""
+        pass
     
 def decimal_to_binary_array(decimal, n):
     # Convert decimal to binary string, remove '0b' prefix
-    binary_str = bin(decimal[0])[2:]
+    binary_str = bin(decimal)[2:]
     # Pad with zeros if necessary
     binary_str = binary_str.zfill(n)
     # Convert to numpy array of integers
@@ -296,9 +359,12 @@ MAX_GRAD_NORM = 0.5
     
 # Make topology
 node_n = 8
-method = "random"
-topology = Topology(n=node_n, model=method, density=1)
+method = "fullmesh"
+if method == "fullmesh":
+    density = 1
+topology = Topology(n=node_n, model=method, density=density)
 topo_string = f"{method}_{node_n}"
+arrival_rate = np.linspace(0, 1, node_n+2).tolist()[1:-1]
 
 # Make timestamp
 def get_fixed_timestamp():
